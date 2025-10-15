@@ -1,0 +1,21 @@
+# Implementation Backlog
+
+- [x] Project scaffolding
+  - [x] Initialize Python package structure (`app/`) with FastAPI entrypoint.
+  - [x] Add configuration module leveraging Pydantic settings.
+  - [x] Configure SQLAlchemy engine/session management with Alembic migrations.
+- [x] Core domain
+  - [x] Define ORM models for entities, roles, permissions, assignments, audit logs.
+  - [x] Implement service layer for entity CRUD and role/assignment management.
+  - [x] Build authorization engine with inheritance and expiry handling.
+- [x] API surface
+  - [x] Expose REST endpoints for health, entities, roles, assignments, authorization.
+  - [x] Add error handling and response schemas.
+- [x] Infrastructure
+  - [x] Add structured logging utilities.
+  - [x] Provide Dockerfile, `build.sh`, and `deploy.sh` aligned with ECS.
+  - [x] Create environment configuration templates.
+- [x] Quality
+  - [x] Implement comprehensive pytest suite (unit + API tests).
+  - [x] Add Makefile/CI script for lint, test, format.
+  - [x] Document local development workflow in README.
