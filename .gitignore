@@ -10,3 +10,4 @@ dist/
 build/
 alembic.ini.bak
 *.log
+.env
