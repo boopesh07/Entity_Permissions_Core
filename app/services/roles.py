@@ -33,6 +33,10 @@ class PermissionScopeError(RoleServiceError):
     """Raised when assignment violates scope constraints."""
 
 
+class RoleConflictError(RoleServiceError):
+    """Raised when attempting to create a role that already exists."""
+
+
 class RoleService:
     """Coordinates permission management and role assignments."""
 
@@ -51,7 +55,11 @@ class RoleService:
         )
         role.permissions = list(self._ensure_permissions(payload.permissions))
         self._session.add(role)
-        self._session.flush()
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            self._session.rollback()
+            raise RoleConflictError(f"Role '{payload.name}' already exists") from exc
 
         self._audit.record(
             action="role.create",

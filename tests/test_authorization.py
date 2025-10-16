@@ -12,8 +12,12 @@ def create_entity(client: TestClient, name: str, entity_type: str, parent_id: st
     return response.json()["id"]
 
 
-def create_role(client: TestClient, name: str, permissions: list[str]) -> str:
-    payload = {"name": name, "permissions": permissions, "scope_types": []}
+def create_role(client: TestClient, name: str, permissions: list[str], scope_types: list[str] | None = None) -> str:
+    payload = {
+        "name": name,
+        "permissions": permissions,
+        "scope_types": scope_types or [],
+    }
     response = client.post("/api/v1/roles", json=payload)
     response.raise_for_status()
     return response.json()["id"]
@@ -65,3 +69,20 @@ def test_authorization_denied_without_assignment(client: TestClient) -> None:
     user_id = str(uuid4())
 
     assert authorize(client, user_id, "document:upload", entity_id) is False
+
+
+def test_global_admin_role_without_scope_limits(client: TestClient) -> None:
+    issuer_id = create_entity(client, "Issuer Delta", "issuer")
+    spv_id = create_entity(client, "SPV Epsilon", "spv")
+    role_id = create_role(
+        client,
+        name="global_admin",
+        permissions=["document:upload", "document:archive"],
+        scope_types=[],
+    )
+
+    user_id = str(uuid4())
+    assign_role(client, role_id, user_id, entity_id=None)
+
+    assert authorize(client, user_id, "document:upload", issuer_id) is True
+    assert authorize(client, user_id, "document:archive", spv_id) is True

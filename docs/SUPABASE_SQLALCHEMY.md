@@ -1,41 +1,31 @@
 # Connecting to Supabase with SQLAlchemy
 
-Supabase recommends the following pattern when connecting via SQLAlchemy. The example below assumes environment variables containing your database credentials and enables TLS (`sslmode=require`).
+Supabase exposes a standard Postgres connection string. With Python 3.12 you can rely on `psycopg2-binary` directly; the snippet below follows Supabase’s guidance and uses `python-dotenv` to load credentials from a `.env` file.
 
 ```python
 from sqlalchemy import create_engine
-# from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 import os
 
-# Load environment variables from .env
 load_dotenv()
 
-# Fetch variables
-USER = os.getenv("user")
-PASSWORD = os.getenv("password")
-HOST = os.getenv("host")
-PORT = os.getenv("port")
-DBNAME = os.getenv("dbname")
+database_url = os.environ["EPR_DATABASE_URL"]
 
-# Construct the SQLAlchemy connection string
-DATABASE_URL = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DBNAME}?sslmode=require"
+# For Supabase’s transaction/session poolers disable SQLAlchemy’s pooling:
+engine = create_engine(database_url, poolclass=NullPool)
 
-# Create the SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
-# If using Transaction Pooler or Session Pooler, disable SQLAlchemy client side pooling:
-# engine = create_engine(DATABASE_URL, poolclass=NullPool)
-
-# Test the connection
 try:
     with engine.connect() as connection:
         print("Connection successful!")
-except Exception as e:
-    print(f"Failed to connect: {e}")
+except Exception as exc:  # noqa: BLE001
+    print(f"Failed to connect: {exc}")
 ```
 
-For the Omen Entity & Permissions Core service, set `EPR_DATABASE_URL` directly (see `.env.example`). A fully expanded example with URL-encoded password is:
+Populate `.env` with the Supabase DSN. For example:
 
 ```
 EPR_DATABASE_URL=postgresql+psycopg2://postgres:Omen%402025@db.dphneelvofreiuchskcn.supabase.co:5432/postgres?sslmode=require
 ```
+
+The core service reads this environment variable through `AppSettings` and Alembic uses the same value (escaping `%` automatically).***

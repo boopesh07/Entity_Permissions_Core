@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
+import sys
 
-try:
-    import python_multipart  # type: ignore
-except ImportError:  # pragma: no cover
-    python_multipart = None  # type: ignore
-else:
-    sys.modules.setdefault("multipart", python_multipart)
+import python_multipart
 
 from fastapi import FastAPI
 
 from app.api.error_handlers import register_exception_handlers
 from app.api.routers import get_api_router
 from app.core.config import AppSettings, get_settings
-from app.core.database import engine, session_scope
+from app.core.database import session_scope
 from app.core.logging import configure_logging
-from app.models import Base
 from app.services.roles import RoleService
+
+# Starlette <0.39 still imports `multipart`; map it to python-multipart to avoid warnings.
+sys.modules.setdefault("multipart", python_multipart)
 
 
 @asynccontextmanager
@@ -28,9 +25,6 @@ async def lifespan(app: FastAPI):  # noqa: D401
     """Application lifespan context for startup/shutdown hooks."""
 
     settings = get_settings()
-    if settings.environment in {"local", "test"}:
-        Base.metadata.create_all(bind=engine)
-
     with session_scope() as session:
         RoleService(session).ensure_baseline_permissions(settings.default_permissions)
 

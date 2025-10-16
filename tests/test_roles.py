@@ -122,3 +122,14 @@ def test_role_update_and_revoke_assignment(client: TestClient) -> None:
     list_resp = client.get("/api/v1/assignments", params={"principal_id": user_id})
     list_resp.raise_for_status()
     assert list_resp.json() == []
+
+
+def test_role_duplicate_conflict(client: TestClient) -> None:
+    payload = {"name": "issuer-doc-admin", "permissions": ["document:upload"], "scope_types": ["issuer"]}
+
+    first = client.post("/api/v1/roles", json=payload)
+    first.raise_for_status()
+
+    duplicate = client.post("/api/v1/roles", json=payload)
+    assert duplicate.status_code == 409
+    assert "already exists" in duplicate.json()["detail"]

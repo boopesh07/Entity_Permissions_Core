@@ -29,3 +29,14 @@ def test_entity_lifecycle(client: TestClient) -> None:
     archive_resp.raise_for_status()
     archived_entity = archive_resp.json()
     assert archived_entity["status"] == "archived"
+
+
+def test_entity_duplicate_conflict(client: TestClient) -> None:
+    payload = {"name": "Issuer Gamma", "type": "issuer", "attributes": {}, "status": "active"}
+
+    first = client.post("/api/v1/entities", json=payload)
+    first.raise_for_status()
+
+    duplicate = client.post("/api/v1/entities", json=payload)
+    assert duplicate.status_code == 409
+    assert "already exists" in duplicate.json()["detail"]

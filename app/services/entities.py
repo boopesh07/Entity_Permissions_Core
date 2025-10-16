@@ -7,6 +7,7 @@ from typing import Iterable, Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.entity import Entity, EntityStatus
@@ -16,6 +17,10 @@ from app.services.audit import AuditService
 
 class EntityNotFoundError(ValueError):
     """Raised when the target entity does not exist."""
+
+
+class EntityConflictError(ValueError):
+    """Raised when attempting to create an entity that already exists."""
 
 
 class EntityService:
@@ -35,7 +40,11 @@ class EntityService:
             attributes=payload.attributes,
         )
         self._session.add(entity)
-        self._session.flush()
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            self._session.rollback()
+            raise EntityConflictError(f"Entity '{payload.name}' of type '{payload.type.value}' already exists") from exc
 
         self._audit.record(
             action="entity.create",

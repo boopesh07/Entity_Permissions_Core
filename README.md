@@ -33,6 +33,15 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
    .venv/bin/python -m pytest -vv
    ```
 
+### Authorization Model Highlights
+
+- **Entity uniqueness** – entity names are unique per `type`; duplicate POSTs return HTTP 409.
+- **Role uniqueness** – role names are globally unique; creating a role with an existing name also returns HTTP 409.
+- **Scope types** – a role’s `scope_types` list limits which entity types it can govern. An empty list means “no restriction”, useful for platform-wide admin roles.
+- **Global assignments** – omit `entity_id` (or send `null`) when calling `/api/v1/assignments` to grant a role across all entities.
+- **Principal types** – `principal_type` is a descriptive label (e.g., `user`, `service`, `group`) stored for audit context; the service does not currently enforce a closed list.
+- **Entity types** – valid values are `issuer`, `spv`, `offering`, `investor`, `agent`, and `other`.
+
 ### Environment Variables
 
 The service is configured via the `AppSettings` class in `app/core/config.py`. Key variables:
@@ -54,6 +63,8 @@ The service is configured via the `AppSettings` class in `app/core/config.py`. K
 | `/api/v1/assignments` | POST/GET | Assign roles to principals |
 | `/api/v1/assignments/{id}` | DELETE | Revoke a role assignment |
 | `/api/v1/authorize` | POST | Stateless authorization check |
+
+Duplicate entity or role POSTs return `409 Conflict` with a descriptive message. Use the list endpoints to discover existing resources before creating new ones.
 
 All mutating endpoints accept an optional `X-Actor-Id` header to attribute audit log entries.
 

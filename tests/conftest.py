@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -33,3 +34,4 @@ def client() -> TestClient:
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module="starlette.formparsers")

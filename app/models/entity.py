@@ -7,7 +7,7 @@ from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import Enum as SqlEnum
-from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -36,13 +36,17 @@ class Entity(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_entities_type", "type"),
         Index("ix_entities_parent", "parent_id"),
+        UniqueConstraint("name", "type", name="uq_entities_name_type"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(length=255), nullable=False)
-    type: Mapped[EntityType] = mapped_column(SqlEnum(EntityType, name="entity_type"), nullable=False)
+    type: Mapped[EntityType] = mapped_column(
+        SqlEnum(EntityType, name="entity_type", native_enum=False),
+        nullable=False,
+    )
     status: Mapped[EntityStatus] = mapped_column(
-        SqlEnum(EntityStatus, name="entity_status"),
+        SqlEnum(EntityStatus, name="entity_status", native_enum=False),
         default=EntityStatus.ACTIVE,
         nullable=False,
     )
