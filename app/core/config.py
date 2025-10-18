@@ -37,7 +37,6 @@ class AppSettings(BaseSettings):
             "document:archive",
         ]
     )
-    default_roles_seeded: bool = Field(default=False, repr=False)
 
     @field_validator("log_level")
     @classmethod

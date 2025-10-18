@@ -11,7 +11,6 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.models.entity import Entity
 from app.models.permission import Permission
 from app.models.role import Role
@@ -44,7 +43,6 @@ class RoleService:
         self._session = session
         self._audit = audit_service or AuditService(session)
         self._logger = logging.getLogger("app.services.roles")
-        self._settings = get_settings()
 
     def create_role(self, payload: RoleCreate, *, actor_id: Optional[UUID]) -> Role:
         role = Role(

@@ -1,0 +1,55 @@
+{
+  "family": "<TASK_FAMILY>",
+  "networkMode": "awsvpc",
+  "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<TASK_ROLE_ARN>",
+  "cpu": "<TASK_CPU>",
+  "memory": "<TASK_MEMORY>",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "containerDefinitions": [
+    {
+      "name": "<CONTAINER_NAME>",
+      "image": "<IMAGE_URI>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "EPR_ENVIRONMENT",
+          "value": "<EPR_ENVIRONMENT>"
+        },
+        {
+          "name": "EPR_DATABASE_URL",
+          "value": "<EPR_DATABASE_URL>"
+        },
+        {
+          "name": "EPR_LOG_LEVEL",
+          "value": "<EPR_LOG_LEVEL>"
+        },
+        {
+          "name": "EPR_LOG_JSON",
+          "value": "<EPR_LOG_JSON>"
+        },
+        {
+          "name": "EPR_SQL_ECHO",
+          "value": "<EPR_SQL_ECHO>"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "<CLOUDWATCH_LOG_GROUP>",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "<CLOUDWATCH_STREAM_PREFIX>",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

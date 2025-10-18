@@ -10,27 +10,36 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
 - Structured JSON logging suitable for CloudWatch ingestion.
 - Alembic migrations and ECS-ready Docker packaging.
 
-## Getting Started
+## Local Development
 
-1. **Create a virtual environment (Python 3.12) & install dependencies**
+1. **Install dependencies (Python 3.12)**
    ```bash
    python3.12 -m venv .venv
    .venv/bin/pip install -r requirements.txt
    ```
 
-2. **Run database migrations** (defaults to local SQLite storage at `./data/epr.db`):
+2. **Configure environment variables**
+   - Copy `.env` or export the variables manually.  
+   - Set `EPR_DATABASE_URL` to your target database (defaults to a local SQLite file).
+
+3. **Run database migrations**
    ```bash
-   .venv/bin/alembic upgrade head
+   EPR_DATABASE_URL="postgresql://..." .venv/bin/alembic upgrade head
    ```
 
-3. **Start the API locally**
+4. **Start the API**
    ```bash
-   .venv/bin/uvicorn app.main:app --reload --port 8000
+   EPR_DATABASE_URL="postgresql://..." .venv/bin/uvicorn app.main:app --reload --port 8000
    ```
 
-4. **Run the test suite**
+5. **Verify the service**
    ```bash
-   .venv/bin/python -m pytest -vv
+   curl -sSf http://localhost:8000/healthz
+   ```
+
+6. **Run the tests**
+   ```bash
+   .venv/bin/pytest -vv
    ```
 
 ### Authorization Model Highlights
@@ -68,43 +77,57 @@ Duplicate entity or role POSTs return `409 Conflict` with a descriptive message.
 
 All mutating endpoints accept an optional `X-Actor-Id` header to attribute audit log entries.
 
-## Docker & Deployment
+## Deployment
 
-Build and test an image:
+### Build the container
 
 ```bash
 ./scripts/build.sh
 ```
 
-Run the container locally:
+The script runs the test suite (unless `SKIP_TESTS=true`), builds a linux/amd64 image, and pushes it to Amazon ECR.
+
+### Push a release to ECS
+
+Ensure the following environment variables are available before deploying:
+
+- `AWS_REGION`, `AWS_ACCOUNT_ID`
+- `ECR_REPOSITORY`
+- `ECS_CLUSTER`, `ECS_SERVICE`
+- `EXECUTION_ROLE_ARN`, `TASK_ROLE_ARN`
+- `ECS_SUBNET_IDS` (comma-separated) and `ECS_SECURITY_GROUP_IDS`
+- Application settings such as `EPR_DATABASE_URL`
+
+Then run:
 
 ```bash
-docker run --rm -p 8080:8080 \
-  -e EPR_DATABASE_URL='sqlite:////data/epr.db' \
-  omen-epr:latest
-```
-
-Trigger migrations and start the app inside the container with `RUN_MIGRATIONS=true` (default).
-
-Deploy to AWS ECS:
-
-```bash
-AWS_REGION=us-east-1 \
-AWS_ACCOUNT_ID=123456789012 \
-ECR_REPOSITORY=omen-epr \
-ECS_CLUSTER=omen-core \
-ECS_SERVICE=omen-epr-svc \
 ./scripts/deploy.sh
 ```
 
-The deployment script pushes the image to ECR and forces a new ECS deployment.
+The script builds/pushes the image (unless `SKIP_BUILD=true`), renders `infra/ecs-task-def.json.template`, registers a new task definition, and updates or creates the ECS service. On startup, each task executes `alembic upgrade head` before launching Uvicorn.
+
+### Post-deploy smoke test
+
+Behind a load balancer or API Gateway, hit the health endpoint:
+
+```bash
+curl -sSf https://<your-api-endpoint>/healthz
+```
+
+For direct testing against a task ENI (public subnet only), ensure the security group allows inbound TCP/8080 before issuing the same curl.
+
+### Schema changes
+
+1. Modify the SQLAlchemy models.
+2. Generate a migration: `alembic revision --autogenerate -m "describe change"`.
+3. Review the migration file and apply it locally: `alembic upgrade head`.
+4. Commit the code + migration and deploy. The production tasks will run `alembic upgrade head` automatically during startup.
 
 ## Development Notes
 
 - Alembic migration templates live in `alembic/versions`.
 - Structured logging is configured in `app/core/logging.py`.
 - Tests use in-memory SQLite with pooled connections.
-- Update `TODO.md` as additional roadmap items are delivered.
 
 ## Future Enhancements
 
