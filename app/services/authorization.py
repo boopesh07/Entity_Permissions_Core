@@ -67,7 +67,7 @@ class AuthorizationService:
             action="authorization.evaluate",
             actor_id=payload.user_id,
             entity_id=entity.id,
-            status="success" if authorized else "failure",
+            entity_type=entity.type.value,
             details={
                 "action": payload.action,
                 "principal_type": payload.principal_type,

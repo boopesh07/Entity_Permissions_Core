@@ -11,11 +11,6 @@ from app.models.base import Base, TimestampMixin
 from app.models.types import GUID, JSONType
 
 
-class AuditStatus(str):
-    SUCCESS = "success"
-    FAILURE = "failure"
-
-
 class AuditLog(TimestampMixin, Base):
     """Immutable audit log entries."""
 
@@ -30,7 +25,7 @@ class AuditLog(TimestampMixin, Base):
     actor_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     actor_type: Mapped[str] = mapped_column(String(length=64), nullable=False, default="user")
     entity_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(String(length=64), nullable=True)
     action: Mapped[str] = mapped_column(String(length=120), nullable=False)
-    status: Mapped[str] = mapped_column(String(length=32), nullable=False, default=AuditStatus.SUCCESS)
     correlation_id: Mapped[str | None] = mapped_column(String(length=120), nullable=True)
     details: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)

@@ -50,6 +50,7 @@ class EntityService:
             action="entity.create",
             actor_id=actor_id,
             entity_id=entity.id,
+            entity_type=entity.type.value,
             details={"type": entity.type, "name": entity.name},
         )
         self._logger.info(
@@ -93,6 +94,7 @@ class EntityService:
             action="entity.update",
             actor_id=actor_id,
             entity_id=entity.id,
+            entity_type=entity.type.value,
             details={"changes": updates},
         )
         self._logger.info(
@@ -111,6 +113,7 @@ class EntityService:
             action="entity.archive",
             actor_id=actor_id,
             entity_id=entity.id,
+            entity_type=entity.type.value,
             details={},
         )
         self._logger.info(

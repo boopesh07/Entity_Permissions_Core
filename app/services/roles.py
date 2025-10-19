@@ -63,6 +63,7 @@ class RoleService:
             action="role.create",
             actor_id=actor_id,
             entity_id=None,
+            entity_type=None,
             details={"role_id": str(role.id), "permissions": payload.permissions},
         )
         self._logger.info(
@@ -89,6 +90,7 @@ class RoleService:
             action="role.update",
             actor_id=actor_id,
             entity_id=None,
+            entity_type=None,
             details={"role_id": str(role.id), "changes": updates},
         )
         self._logger.info(
@@ -143,6 +145,7 @@ class RoleService:
             action="role_assignment.create",
             actor_id=actor_id,
             entity_id=payload.entity_id,
+            entity_type=entity.type.value if entity else None,
             details={
                 "role_id": str(payload.role_id),
                 "principal_id": str(payload.principal_id),
@@ -178,13 +181,17 @@ class RoleService:
         if not assignment:
             raise RoleServiceError(f"Assignment {assignment_id} not found")
 
+        entity_type = assignment.entity.type.value if assignment.entity else None
+        entity_id = assignment.entity_id
+
         self._session.delete(assignment)
         self._session.flush()
 
         self._audit.record(
             action="role_assignment.delete",
             actor_id=actor_id,
-            entity_id=assignment.entity_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
             details={"assignment_id": str(assignment_id)},
         )
         self._logger.info(
