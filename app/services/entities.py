@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.entity import Entity, EntityStatus
 from app.schemas.entity import EntityCreate, EntityUpdate
 from app.services.audit import AuditService
+from app.services.notifications import DocumentVaultPublisher, get_document_publisher
 
 
 class EntityNotFoundError(ValueError):
@@ -26,9 +27,15 @@ class EntityConflictError(ValueError):
 class EntityService:
     """Encapsulates entity CRUD operations with auditing."""
 
-    def __init__(self, session: Session, audit_service: Optional[AuditService] = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        audit_service: Optional[AuditService] = None,
+        document_publisher: Optional[DocumentVaultPublisher] = None,
+    ) -> None:
         self._session = session
         self._audit = audit_service or AuditService(session)
+        self._document_publisher = document_publisher or get_document_publisher()
         self._logger = logging.getLogger("app.services.entities")
 
     def create_entity(self, payload: EntityCreate, *, actor_id: Optional[UUID]) -> Entity:
@@ -67,6 +74,7 @@ class EntityService:
 
     def list(self, *, types: Optional[Iterable[str]] = None, parent_id: Optional[UUID] = None) -> list[Entity]:
         stmt = select(Entity)
+        stmt = stmt.filter(Entity.status != EntityStatus.ARCHIVED)
         if types:
             stmt = stmt.filter(Entity.type.in_(types))
         if parent_id:
@@ -120,4 +128,11 @@ class EntityService:
             "entity_archived",
             extra={"entity_id": str(entity.id), "actor_id": str(actor_id) if actor_id else None},
         )
+        try:
+            self._document_publisher.publish_entity_deleted(entity_id=entity.id, entity_type=entity.type.value)
+        except Exception:  # pragma: no cover - logging handled inside publisher
+            self._logger.exception(
+                "document_vault_notification_failed",
+                extra={"entity_id": str(entity.id), "entity_type": entity.type.value},
+            )
         return entity

@@ -28,6 +28,8 @@ class EntityUpdate(BaseModel):
     parent_id: Optional[UUID] = None
     attributes: Optional[Dict[str, Any]] = None
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class EntityResponse(EntityBase):
     id: UUID

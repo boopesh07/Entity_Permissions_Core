@@ -40,3 +40,61 @@ def test_entity_duplicate_conflict(client: TestClient) -> None:
     duplicate = client.post("/api/v1/entities", json=payload)
     assert duplicate.status_code == 409
     assert "already exists" in duplicate.json()["detail"]
+
+
+def test_entity_invalid_payload_returns_400(client: TestClient) -> None:
+    response = client.post("/api/v1/entities", json={"type": "issuer"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    assert any(error["loc"][-1] == "name" for error in detail)
+
+
+def test_entity_immutable_fields_rejected(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/entities",
+        json={"name": "Immutable Check", "type": "issuer", "attributes": {}, "status": "active"},
+    )
+    create_resp.raise_for_status()
+    entity_id = create_resp.json()["id"]
+
+    patch_resp = client.patch(f"/api/v1/entities/{entity_id}", json={"type": "spv"})
+    assert patch_resp.status_code == 400
+
+    get_resp = client.get(f"/api/v1/entities/{entity_id}")
+    get_resp.raise_for_status()
+    assert get_resp.json()["type"] == "issuer"
+
+
+def test_archived_entities_hidden_from_list(client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/v1/entities",
+        json={"name": "Archived Entity", "type": "issuer", "attributes": {}, "status": "active"},
+    )
+    create_resp.raise_for_status()
+    entity_id = create_resp.json()["id"]
+
+    archive_resp = client.post(f"/api/v1/entities/{entity_id}/archive")
+    archive_resp.raise_for_status()
+
+    list_resp = client.get("/api/v1/entities")
+    list_resp.raise_for_status()
+    ids = [item["id"] for item in list_resp.json()]
+    assert entity_id not in ids
+
+
+def test_entity_archive_publishes_document_event(client: TestClient, document_publisher_stub) -> None:
+    create_resp = client.post(
+        "/api/v1/entities",
+        json={"name": "Document Event", "type": "issuer", "attributes": {}, "status": "active"},
+    )
+    create_resp.raise_for_status()
+    entity_id = create_resp.json()["id"]
+
+    archive_resp = client.post(f"/api/v1/entities/{entity_id}/archive")
+    archive_resp.raise_for_status()
+
+    assert len(document_publisher_stub.deleted_events) == 1
+    event = document_publisher_stub.deleted_events[0]
+    assert event["entity_id"] == entity_id
+    assert event["entity_type"] == "issuer"

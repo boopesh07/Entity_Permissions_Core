@@ -16,15 +16,22 @@ from app.models.role_assignment import RoleAssignment
 from app.models.role import Role
 from app.schemas.authorization import AuthorizationRequest
 from app.services.audit import AuditService
+from app.services.cache import PermissionCache, PermissionCacheKey, get_permission_cache
 
 
 class AuthorizationService:
     """Evaluates whether a principal has permission for a resource."""
 
-    def __init__(self, session: Session, audit_service: Optional[AuditService] = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        audit_service: Optional[AuditService] = None,
+        cache: Optional[PermissionCache] = None,
+    ) -> None:
         self._session = session
         self._audit = audit_service or AuditService(session)
         self._logger = logging.getLogger("app.services.authorization")
+        self._cache = cache or get_permission_cache()
 
     def authorize(self, payload: AuthorizationRequest) -> bool:
         entity = self._session.get(Entity, payload.resource_id)
@@ -37,6 +44,25 @@ class AuthorizationService:
 
         lineage_ids = self._collect_entity_lineage_ids(entity.id)
         now = datetime.now(tz=timezone.utc)
+
+        cache_key: PermissionCacheKey = (
+            str(payload.user_id),
+            payload.principal_type,
+            str(payload.resource_id),
+            payload.action,
+        )
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            self._logger.info(
+                "authorization_cache_hit",
+                extra={
+                    "user_id": str(payload.user_id),
+                    "resource_id": str(payload.resource_id),
+                    "action": payload.action,
+                    "authorized": cached,
+                },
+            )
+            return cached
 
         stmt = (
             select(RoleAssignment, Role)
@@ -93,6 +119,8 @@ class AuthorizationService:
                     "action": payload.action,
                 },
             )
+
+        self._cache.set(cache_key, authorized, principal_id=str(payload.user_id))
         return authorized
 
     def _collect_entity_lineage_ids(self, entity_id: UUID) -> List[UUID]:

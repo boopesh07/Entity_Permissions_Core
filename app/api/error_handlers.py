@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.services.entities import EntityConflictError, EntityNotFoundError
@@ -18,6 +19,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(EntityNotFoundError)
     async def entity_not_found_handler(request: Request, exc: EntityNotFoundError) -> JSONResponse:  # noqa: WPS430
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:  # noqa: WPS430
+        return JSONResponse(status_code=400, content={"detail": exc.errors()})
 
     @app.exception_handler(RoleNotFoundError)
     async def role_not_found_handler(request: Request, exc: RoleNotFoundError) -> JSONResponse:  # noqa: WPS430

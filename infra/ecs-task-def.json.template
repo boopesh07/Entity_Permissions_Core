@@ -40,6 +40,30 @@
         {
           "name": "EPR_SQL_ECHO",
           "value": "<EPR_SQL_ECHO>"
+        },
+        {
+          "name": "EPR_REDIS_URL",
+          "value": "<EPR_REDIS_URL>"
+        },
+        {
+          "name": "EPR_REDIS_TOKEN",
+          "value": "<EPR_REDIS_TOKEN>"
+        },
+        {
+          "name": "EPR_REDIS_CACHE_PREFIX",
+          "value": "<EPR_REDIS_CACHE_PREFIX>"
+        },
+        {
+          "name": "EPR_REDIS_CACHE_TTL",
+          "value": "<EPR_REDIS_CACHE_TTL>"
+        },
+        {
+          "name": "EPR_DOCUMENT_VAULT_TOPIC_ARN",
+          "value": "<EPR_DOCUMENT_VAULT_TOPIC_ARN>"
+        },
+        {
+          "name": "EPR_DOCUMENT_EVENT_SOURCE",
+          "value": "<EPR_DOCUMENT_EVENT_SOURCE>"
         }
       ],
       "logConfiguration": {
@@ -48,6 +72,59 @@
           "awslogs-group": "<CLOUDWATCH_LOG_GROUP>",
           "awslogs-region": "<AWS_REGION>",
           "awslogs-stream-prefix": "<CLOUDWATCH_STREAM_PREFIX>",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+    {
+      "name": "audit-worker",
+      "image": "<IMAGE_URI>",
+      "essential": false,
+      "command": ["python", "-m", "app.workers.audit_consumer"],
+      "environment": [
+        {
+          "name": "EPR_ENVIRONMENT",
+          "value": "<EPR_ENVIRONMENT>"
+        },
+        {
+          "name": "EPR_DATABASE_URL",
+          "value": "<EPR_DATABASE_URL>"
+        },
+        {
+          "name": "EPR_LOG_LEVEL",
+          "value": "<EPR_LOG_LEVEL>"
+        },
+        {
+          "name": "EPR_LOG_JSON",
+          "value": "<EPR_LOG_JSON>"
+        },
+        {
+          "name": "EPR_AUDIT_SQS_URL",
+          "value": "<EPR_AUDIT_SQS_URL>"
+        },
+        {
+          "name": "EPR_AUDIT_SQS_MAX_MESSAGES",
+          "value": "<EPR_AUDIT_SQS_MAX_MESSAGES>"
+        },
+        {
+          "name": "EPR_AUDIT_SQS_WAIT_TIME",
+          "value": "<EPR_AUDIT_SQS_WAIT_TIME>"
+        },
+        {
+          "name": "EPR_AUDIT_SQS_VISIBILITY_TIMEOUT",
+          "value": "<EPR_AUDIT_SQS_VISIBILITY_TIMEOUT>"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "<AWS_REGION>"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "<CLOUDWATCH_LOG_GROUP>",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "worker",
           "awslogs-create-group": "true"
         }
       }

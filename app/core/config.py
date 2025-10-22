@@ -37,6 +37,12 @@ class AppSettings(BaseSettings):
             "document:archive",
         ]
     )
+    redis_url: str | None = Field(default=None)
+    redis_token: str | None = Field(default=None)
+    redis_cache_prefix: str = Field(default="epr")
+    redis_cache_ttl: int = Field(default=300)
+    document_vault_topic_arn: str | None = Field(default=None)
+    document_event_source: str = Field(default="entity_permissions_core")
 
     @field_validator("log_level")
     @classmethod
@@ -50,6 +56,20 @@ class AppSettings(BaseSettings):
             return []
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("redis_url", "redis_token", "document_vault_topic_arn", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, value: str | None) -> str | None:
+        if value == "":
+            return None
+        return value
+
+    @field_validator("redis_cache_ttl", mode="before")
+    @classmethod
+    def ensure_int_ttl(cls, value: int | str | None) -> int | str | None:
+        if value in (None, ""):
+            return 300
         return value
 
 

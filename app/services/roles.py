@@ -18,6 +18,7 @@ from app.models.role_assignment import RoleAssignment
 from app.schemas.assignment import RoleAssignmentCreate
 from app.schemas.role import RoleCreate, RoleUpdate
 from app.services.audit import AuditService
+from app.services.cache import PermissionCache, get_permission_cache
 
 
 class RoleServiceError(Exception):
@@ -39,10 +40,16 @@ class RoleConflictError(RoleServiceError):
 class RoleService:
     """Coordinates permission management and role assignments."""
 
-    def __init__(self, session: Session, audit_service: Optional[AuditService] = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        audit_service: Optional[AuditService] = None,
+        cache: Optional[PermissionCache] = None,
+    ) -> None:
         self._session = session
         self._audit = audit_service or AuditService(session)
         self._logger = logging.getLogger("app.services.roles")
+        self._cache = cache or get_permission_cache()
 
     def create_role(self, payload: RoleCreate, *, actor_id: Optional[UUID]) -> Role:
         role = Role(
@@ -70,6 +77,7 @@ class RoleService:
             "role_created",
             extra={"role_id": str(role.id), "actor_id": str(actor_id) if actor_id else None},
         )
+        self._cache.invalidate()
         return role
 
     def update_role(self, role_id: UUID, payload: RoleUpdate, *, actor_id: Optional[UUID]) -> Role:
@@ -97,6 +105,7 @@ class RoleService:
             "role_updated",
             extra={"role_id": str(role.id), "actor_id": str(actor_id) if actor_id else None},
         )
+        self._cache.invalidate()
         return role
 
     def list_roles(self) -> List[Role]:
@@ -160,6 +169,7 @@ class RoleService:
                 "entity_id": str(payload.entity_id) if payload.entity_id else None,
             },
         )
+        self._cache.invalidate_for_principal(str(payload.principal_id))
         return assignment
 
     def list_assignments(
@@ -198,6 +208,8 @@ class RoleService:
             "role_assignment_revoked",
             extra={"assignment_id": str(assignment_id), "actor_id": str(actor_id) if actor_id else None},
         )
+        if assignment:
+            self._cache.invalidate_for_principal(str(assignment.principal_id))
 
     def ensure_baseline_permissions(self, actions: Iterable[str]) -> None:
         """Idempotently create baseline permission records."""
