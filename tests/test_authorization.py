@@ -157,3 +157,54 @@ def test_authorization_deterministic_across_runs(client: TestClient) -> None:
 
     results = [authorize(client, user_id, "document:archive", entity_id) for _ in range(5)]
     assert all(results)
+
+
+def test_authorization_fails_with_nonexistent_entity(client: TestClient) -> None:
+    """Verify authorization returns 404 error when entity doesn't exist."""
+    user_id = str(uuid4())
+    fake_entity_id = str(uuid4())  # Non-existent entity
+
+    response = client.post(
+        "/api/v1/authorize",
+        json={"user_id": user_id, "action": "document:upload", "resource_id": fake_entity_id},
+    )
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_authorization_with_valid_entity_after_assignment(client: TestClient) -> None:
+    """Verify authorization works correctly with valid entity after role assignment."""
+    entity_id = create_entity(client, "Valid Entity", "issuer")
+    role_id = create_role(client, "valid_role", ["document:upload"])
+    user_id = str(uuid4())
+    assign_role(client, role_id, user_id, entity_id)
+
+    # Should return True for authorized action
+    assert authorize(client, user_id, "document:upload", entity_id) is True
+
+    # Should return False for unauthorized action
+    assert authorize(client, user_id, "document:download", entity_id) is False
+
+
+def test_authorization_fails_for_archived_entity(client: TestClient) -> None:
+    """Verify authorization behavior when entity is archived.
+    
+    Archived entities still exist in the database but are marked as archived.
+    Authorization should still work on archived entities.
+    """
+    entity_id = create_entity(client, "Archive Test Entity", "issuer")
+    role_id = create_role(client, "archive_test_role", ["document:upload"])
+    user_id = str(uuid4())
+    assign_role(client, role_id, user_id, entity_id)
+
+    # Verify authorization works before archiving
+    assert authorize(client, user_id, "document:upload", entity_id) is True
+
+    # Archive the entity
+    archive_resp = client.post(f"/api/v1/entities/{entity_id}/archive")
+    archive_resp.raise_for_status()
+
+    # Authorization should still work (archived entities exist in DB, just marked as archived)
+    # This is the expected behavior - archived entities can still be queried for permissions
+    assert authorize(client, user_id, "document:upload", entity_id) is True

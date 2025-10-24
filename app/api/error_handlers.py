@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.services.authorization import EntityNotFoundError as AuthEntityNotFoundError
 from app.services.entities import EntityConflictError, EntityNotFoundError
 from app.services.roles import (
     PermissionScopeError,
@@ -18,6 +19,10 @@ from app.services.roles import (
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(EntityNotFoundError)
     async def entity_not_found_handler(request: Request, exc: EntityNotFoundError) -> JSONResponse:  # noqa: WPS430
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(AuthEntityNotFoundError)
+    async def auth_entity_not_found_handler(request: Request, exc: AuthEntityNotFoundError) -> JSONResponse:  # noqa: WPS430
         return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @app.exception_handler(RequestValidationError)

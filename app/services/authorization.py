@@ -19,6 +19,14 @@ from app.services.audit import AuditService
 from app.services.cache import PermissionCache, PermissionCacheKey, get_permission_cache
 
 
+class AuthorizationError(Exception):
+    """Base class for authorization service errors."""
+
+
+class EntityNotFoundError(AuthorizationError):
+    """Raised when the target entity does not exist for authorization."""
+
+
 class AuthorizationService:
     """Evaluates whether a principal has permission for a resource."""
 
@@ -37,10 +45,10 @@ class AuthorizationService:
         entity = self._session.get(Entity, payload.resource_id)
         if not entity:
             self._logger.warning(
-                "authorization_denied_missing_entity",
+                "authorization_entity_not_found",
                 extra={"resource_id": str(payload.resource_id)},
             )
-            return False
+            raise EntityNotFoundError(f"Entity {payload.resource_id} not found")
 
         lineage_ids = self._collect_entity_lineage_ids(entity.id)
         now = datetime.now(tz=timezone.utc)
