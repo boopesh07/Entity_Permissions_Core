@@ -179,12 +179,37 @@ echo "Registered task definition: ${TASK_DEF_ARN}"
 SERVICE_STATUS=$(aws ecs describe-services --cluster "${ECS_CLUSTER}" --services "${ECS_SERVICE}" --query 'services[0].status' --output text 2>/dev/null | tr -d '\r')
 if [[ "${SERVICE_STATUS}" == "ACTIVE" ]]; then
   echo "Updating existing ECS service ${ECS_SERVICE}"
+  NETWORK_ARGS=()
+  if [[ -n "${ECS_SUBNET_IDS}" && -n "${ECS_SECURITY_GROUP_IDS}" ]]; then
+    export ECS_SUBNET_IDS ECS_SECURITY_GROUP_IDS ECS_ASSIGN_PUBLIC_IP
+    NETWORK_CONFIGURATION=$(python - <<'PY'
+import json
+import os
+import sys
+
+subnets = [s.strip() for s in os.environ["ECS_SUBNET_IDS"].split(",") if s.strip()]
+security_groups = [s.strip() for s in os.environ["ECS_SECURITY_GROUP_IDS"].split(",") if s.strip()]
+
+if not subnets or not security_groups:
+    sys.stderr.write("ERROR: ECS_SUBNET_IDS and ECS_SECURITY_GROUP_IDS must contain at least one value.\n")
+    raise SystemExit(1)
+
+assign_public_ip = os.environ.get("ECS_ASSIGN_PUBLIC_IP", "ENABLED")
+
+payload = f"awsvpcConfiguration={{subnets={json.dumps(subnets)},securityGroups={json.dumps(security_groups)},assignPublicIp=\"{assign_public_ip}\"}}"
+print(payload)
+PY
+)
+    NETWORK_ARGS+=(--network-configuration "${NETWORK_CONFIGURATION}")
+  fi
+
   aws ecs update-service \
     --cluster "${ECS_CLUSTER}" \
     --service "${ECS_SERVICE}" \
     --task-definition "${TASK_DEF_ARN}" \
     --desired-count "${DESIRED_COUNT}" \
     --force-new-deployment \
+    "${NETWORK_ARGS[@]}" \
     --output text >/dev/null
 else
   echo "Creating ECS service ${ECS_SERVICE}"

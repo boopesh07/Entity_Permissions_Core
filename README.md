@@ -159,6 +159,17 @@ Entity archives emit `entity.deleted` events to the `EPR_DOCUMENT_VAULT_TOPIC_AR
 
 Use the `entity_id`/`entity_type` pair to cascade document archival or deletion, then acknowledge the message (e.g., delete it from SQS).
 
+---
+
+## Deployment Review & Self-Check (2025-10)
+
+- **ALB integration confirmed** – The ECS service now fronts the API through the public ALB `epr-alb`. Listener `:80` forwards to target group `epr-tg` on container port `8080`. Security groups are locked down so only the ALB SG (`sg-016730c5005c5c7b1`) can reach the task SG (`sg-09b1c41ac8c1d448d`) on `8080`.
+- **Health checks verified** – `/api/v1/healthz` responds with 200 once migrations complete. We tailed `/ecs/omen-epr` logs to confirm startup and applied a health-check grace period as needed during troubleshooting.
+- **Operational smoke test** – `curl http://epr-alb-509503971.us-east-1.elb.amazonaws.com/api/v1/healthz` returns `{"status":"ok"}`, demonstrating end-to-end connectivity through the load balancer.
+- **Action items** – Keep `.env` values (`ECS_SUBNET_IDS`, `ECS_SECURITY_GROUP_IDS`) aligned with the active service configuration before running helper scripts; update the health-check grace period if future migrations extend startup time.
+
+No code changes were required for this validation pass; the work consisted of infrastructure wiring, log inspection, and operational verification.
+
 ## Audit verification
 
 Use the verification script to recompute the hash chain and detect tampering or reordering:
