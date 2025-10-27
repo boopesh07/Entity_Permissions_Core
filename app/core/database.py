@@ -25,11 +25,14 @@ def _resolve_sqlite_path(database_url: str) -> None:
     if parsed.path in (":memory:", "/:memory:"):
         return
 
-    # Handles relative paths such as sqlite:///./data/epr.db
-    if parsed.path.startswith("/"):
-        db_path = Path(parsed.path)
-    else:
-        db_path = Path(parsed.path)
+    if not parsed.path:
+        return
+
+    raw_path = parsed.path
+    if parsed.netloc and not raw_path.startswith("/"):
+        raw_path = f"/{parsed.netloc}{raw_path}"
+
+    db_path = Path(raw_path)
     db_dir = db_path.expanduser().resolve().parent
     db_dir.mkdir(parents=True, exist_ok=True)
 

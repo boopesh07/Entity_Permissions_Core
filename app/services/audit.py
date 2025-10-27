@@ -16,11 +16,68 @@ from app.models.audit_log import AuditLog
 from app.schemas.audit import AuditEvent
 
 
+HASH_VERSION = 1
+GENESIS_HASH = "0" * 64
+
+
+def to_optional_str(value: UUID | str | None) -> Optional[str]:
+    """Convert UUID-like values to string while preserving None."""
+
+    if value is None:
+        return None
+    return str(value)
+
+
+def _normalize_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def canonicalize_audit_entry_payload(
+    *,
+    sequence: int,
+    hash_version: int,
+    event_id: Optional[str],
+    source: str,
+    action: str,
+    actor_id: UUID | str | None,
+    actor_type: str,
+    entity_id: UUID | str | None,
+    entity_type: Optional[str],
+    correlation_id: Optional[str],
+    details: Optional[Dict[str, Any]],
+    occurred_at: datetime,
+    previous_hash: str,
+) -> str:
+    """Return the canonical JSON string used for audit chain hashing."""
+
+    payload = {
+        "sequence": sequence,
+        "hash_version": hash_version,
+        "event_id": event_id,
+        "source": source,
+        "action": action,
+        "actor_id": to_optional_str(actor_id),
+        "actor_type": actor_type,
+        "entity_id": to_optional_str(entity_id),
+        "entity_type": entity_type,
+        "correlation_id": correlation_id,
+        "details": details or {},
+        "occurred_at": _normalize_timestamp(occurred_at).isoformat(),
+        "previous_hash": previous_hash,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def compute_audit_entry_hash(previous_hash: str, canonical_payload: str) -> str:
+    """Derive the SHA256 hash that anchors the audit chain."""
+
+    return hashlib.sha256((previous_hash + canonical_payload).encode("utf-8")).hexdigest()
+
+
 class AuditService:
     """Persists audit entries and mirrors them to structured logs."""
-
-    _HASH_VERSION = 1
-    _GENESIS_HASH = "0" * 64
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -68,31 +125,29 @@ class AuditService:
         previous_sequence, previous_hash = self._lock_chain_tip()
         next_sequence = previous_sequence + 1
 
-        canonical_payload = self._serialize_for_hash(
-            {
-                "sequence": next_sequence,
-                "hash_version": self._HASH_VERSION,
-                "event_id": event_id_str,
-                "source": event.source,
-                "action": event.action,
-                "actor_id": self._optional_str(event.actor_id),
-                "actor_type": event.actor_type,
-                "entity_id": self._optional_str(event.entity_id),
-                "entity_type": event.entity_type,
-                "correlation_id": event.correlation_id,
-                "details": event.details,
-                "occurred_at": event.occurred_at.astimezone(timezone.utc).isoformat(),
-                "previous_hash": previous_hash,
-            }
+        canonical_payload = canonicalize_audit_entry_payload(
+            sequence=next_sequence,
+            hash_version=HASH_VERSION,
+            event_id=event_id_str,
+            source=event.source,
+            action=event.action,
+            actor_id=event.actor_id,
+            actor_type=event.actor_type,
+            entity_id=event.entity_id,
+            entity_type=event.entity_type,
+            correlation_id=event.correlation_id,
+            details=event.details,
+            occurred_at=event.occurred_at,
+            previous_hash=previous_hash,
         )
 
-        entry_hash = self._compute_entry_hash(previous_hash, canonical_payload)
+        entry_hash = compute_audit_entry_hash(previous_hash, canonical_payload)
 
         audit_entry = AuditLog(
             sequence=next_sequence,
             previous_hash=previous_hash,
             entry_hash=entry_hash,
-            hash_version=self._HASH_VERSION,
+            hash_version=HASH_VERSION,
             event_id=event_id_str,
             source=event.source,
             occurred_at=event.occurred_at,
@@ -115,8 +170,8 @@ class AuditService:
                 "entry_hash": entry_hash,
                 "previous_hash": previous_hash,
                 "action": event.action,
-                "actor_id": self._optional_str(event.actor_id),
-                "entity_id": self._optional_str(event.entity_id),
+                "actor_id": to_optional_str(event.actor_id),
+                "entity_id": to_optional_str(event.entity_id),
                 "entity_type": event.entity_type,
                 "source": event.source,
                 "event_id": event_id_str,
@@ -131,18 +186,6 @@ class AuditService:
             stmt = stmt.with_for_update(nowait=False)
         result = self._session.execute(stmt).first()
         if result is None:
-            return 0, self._GENESIS_HASH
+            return 0, GENESIS_HASH
         sequence, entry_hash = result
         return int(sequence), str(entry_hash)
-
-    @staticmethod
-    def _serialize_for_hash(payload: Dict[str, Any]) -> str:
-        return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-
-    @staticmethod
-    def _compute_entry_hash(previous_hash: str, canonical_payload: str) -> str:
-        return hashlib.sha256((previous_hash + canonical_payload).encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _optional_str(value: Optional[UUID]) -> Optional[str]:
-        return str(value) if value is not None else None

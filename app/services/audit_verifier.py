@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timezone
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
-from app.services.audit import AuditService
+from app.services.audit import (
+    GENESIS_HASH,
+    canonicalize_audit_entry_payload,
+    compute_audit_entry_hash,
+)
 
 
 class AuditVerificationError(RuntimeError):
@@ -48,8 +50,8 @@ class AuditVerifier:
         if not entries:
             return VerificationResult(checked=0, start_sequence=start_sequence or 0, end_sequence=end_sequence or 0)
 
-        previous_hash = AuditService._GENESIS_HASH  # noqa: SLF001 intentional reuse
-        expected_sequence: Optional[int] = None
+        previous_hash = GENESIS_HASH
+        previous_sequence = entries[0].sequence - 1
 
         if start_sequence and start_sequence > 1:
             previous_entry = self._session.scalar(
@@ -58,38 +60,33 @@ class AuditVerifier:
             if not previous_entry:
                 raise AuditVerificationError(f"Missing audit entry for sequence {start_sequence - 1}")
             previous_hash = previous_entry.entry_hash
-            expected_sequence = start_sequence - 1
+            previous_sequence = start_sequence - 1
 
         checked = 0
         for entry in entries:
-            expected_sequence = expected_sequence + 1 if expected_sequence is not None else entry.sequence
-            if entry.sequence != expected_sequence:
+            expected = previous_sequence + 1
+            if entry.sequence != expected:
                 raise AuditVerificationError(
-                    f"Sequence gap detected. Expected {expected_sequence}, found {entry.sequence}"
+                    f"Sequence gap detected. Expected {expected}, found {entry.sequence}"
                 )
 
-            timestamp = entry.occurred_at
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-
-            canonical_payload = AuditService._serialize_for_hash(  # noqa: SLF001 reuse canonicalization
-                {
-                    "sequence": entry.sequence,
-                    "hash_version": entry.hash_version,
-                    "event_id": entry.event_id,
-                    "source": entry.source,
-                    "action": entry.action,
-                    "actor_id": entry.actor_id and str(entry.actor_id),
-                    "actor_type": entry.actor_type,
-                    "entity_id": entry.entity_id and str(entry.entity_id),
-                    "entity_type": entry.entity_type,
-                    "correlation_id": entry.correlation_id,
-                    "details": entry.details or {},
-                    "occurred_at": timestamp.astimezone(timezone.utc).isoformat(),
-                    "previous_hash": previous_hash,
-                }
+            canonical_payload = canonicalize_audit_entry_payload(
+                sequence=entry.sequence,
+                hash_version=entry.hash_version,
+                event_id=entry.event_id,
+                source=entry.source,
+                action=entry.action,
+                actor_id=entry.actor_id,
+                actor_type=entry.actor_type,
+                entity_id=entry.entity_id,
+                entity_type=entry.entity_type,
+                correlation_id=entry.correlation_id,
+                details=entry.details,
+                occurred_at=entry.occurred_at,
+                previous_hash=previous_hash,
             )
-            expected_hash = AuditService._compute_entry_hash(previous_hash, canonical_payload)  # noqa: SLF001
+
+            expected_hash = compute_audit_entry_hash(previous_hash, canonical_payload)
 
             if entry.previous_hash != previous_hash or entry.entry_hash != expected_hash:
                 raise AuditVerificationError(
@@ -97,6 +94,7 @@ class AuditVerifier:
                 )
 
             previous_hash = entry.entry_hash
+            previous_sequence = entry.sequence
             checked += 1
 
         return VerificationResult(

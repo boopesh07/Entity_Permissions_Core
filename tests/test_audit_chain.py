@@ -11,7 +11,7 @@ from app.models.entity import EntityStatus, EntityType
 from app.schemas.assignment import RoleAssignmentCreate
 from app.schemas.entity import EntityCreate, EntityUpdate
 from app.schemas.role import RoleCreate
-from app.services.audit import AuditService
+from app.services.audit import AuditService, GENESIS_HASH
 from app.services.audit_verifier import AuditVerifier, AuditVerificationError
 from app.services.entities import EntityService
 from app.services.roles import RoleService
@@ -106,7 +106,7 @@ def test_entity_and_role_actions_append_chained_audit_logs(client) -> None:
         assert len(entries) >= 6
         for index, entry in enumerate(entries):
             if index == 0:
-                assert entry.previous_hash == AuditService._GENESIS_HASH
+                assert entry.previous_hash == GENESIS_HASH
             else:
                 assert entry.previous_hash == entries[index - 1].entry_hash
 
@@ -124,7 +124,7 @@ def test_audit_chain_reordering_detected(client) -> None:
 
     with session_scope() as session:
         entry = session.get(AuditLog, second_id)
-        entry.previous_hash = AuditService._GENESIS_HASH
+        entry.previous_hash = GENESIS_HASH
         session.add(entry)
 
     with session_scope() as session:

@@ -101,9 +101,9 @@ class RedisPermissionCache(PermissionCache):
 
     def invalidate_for_principal(self, principal_id: str) -> None:
         index_key = self._principal_index_key(principal_id)
-        keys = cast(Sequence[str], self._execute("SMEMBERS", index_key) or [])
+        keys = list(cast(Sequence[str], self._execute("SMEMBERS", index_key) or []))
         if keys:
-            self._execute("DEL", *([index_key] + list(keys)))
+            self._execute("DEL", index_key, *keys)
         else:
             self._execute("DEL", index_key)
         self._execute("SREM", self._registry_key, principal_id)

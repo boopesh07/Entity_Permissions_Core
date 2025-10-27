@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -22,12 +22,14 @@ class AuditLog(TimestampMixin, Base):
         Index("ix_audit_logs_action", "action"),
         Index("ix_audit_logs_sequence", "sequence", unique=True),
         UniqueConstraint("event_id", name="uq_audit_logs_event_id"),
+        CheckConstraint("length(previous_hash) = 64", name="ck_audit_logs_previous_hash_length"),
+        CheckConstraint("length(entry_hash) = 64", name="ck_audit_logs_entry_hash_length"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    previous_hash: Mapped[str] = mapped_column(String(length=128), nullable=False)
-    entry_hash: Mapped[str] = mapped_column(String(length=128), nullable=False)
+    previous_hash: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(length=64), nullable=False)
     hash_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     event_id: Mapped[str | None] = mapped_column(String(length=128), nullable=True)
     source: Mapped[str] = mapped_column(String(length=128), nullable=False, default="entity_permissions_core")
