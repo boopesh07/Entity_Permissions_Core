@@ -82,19 +82,3 @@ def test_archived_entities_hidden_from_list(client: TestClient) -> None:
     ids = [item["id"] for item in list_resp.json()]
     assert entity_id not in ids
 
-
-def test_entity_archive_publishes_document_event(client: TestClient, document_publisher_stub) -> None:
-    create_resp = client.post(
-        "/api/v1/entities",
-        json={"name": "Document Event", "type": "issuer", "attributes": {}, "status": "active"},
-    )
-    create_resp.raise_for_status()
-    entity_id = create_resp.json()["id"]
-
-    archive_resp = client.post(f"/api/v1/entities/{entity_id}/archive")
-    archive_resp.raise_for_status()
-
-    assert len(document_publisher_stub.deleted_events) == 1
-    event = document_publisher_stub.deleted_events[0]
-    assert event["entity_id"] == entity_id
-    assert event["entity_type"] == "issuer"

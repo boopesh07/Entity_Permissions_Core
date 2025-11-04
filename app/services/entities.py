@@ -10,10 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.events_engine import EventDispatcher, get_event_dispatcher
 from app.models.entity import Entity, EntityStatus
 from app.schemas.entity import EntityCreate, EntityUpdate
 from app.services.audit import AuditService
-from app.services.notifications import DocumentVaultPublisher, get_document_publisher
 
 
 class EntityNotFoundError(ValueError):
@@ -31,11 +31,11 @@ class EntityService:
         self,
         session: Session,
         audit_service: Optional[AuditService] = None,
-        document_publisher: Optional[DocumentVaultPublisher] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         self._session = session
         self._audit = audit_service or AuditService(session)
-        self._document_publisher = document_publisher or get_document_publisher()
+        self._events = event_dispatcher or get_event_dispatcher()
         self._logger = logging.getLogger("app.services.entities")
 
     def create_entity(self, payload: EntityCreate, *, actor_id: Optional[UUID]) -> Entity:
@@ -129,10 +129,17 @@ class EntityService:
             extra={"entity_id": str(entity.id), "actor_id": str(actor_id) if actor_id else None},
         )
         try:
-            self._document_publisher.publish_entity_deleted(entity_id=entity.id, entity_type=entity.type.value)
-        except Exception:  # pragma: no cover - logging handled inside publisher
+            self._events.publish_event(
+                self._session,
+                event_type="entity.archived",
+                payload={
+                    "entity_id": str(entity.id),
+                    "entity_type": entity.type.value,
+                },
+            )
+        except Exception:  # pragma: no cover - logging handled inside dispatcher/publisher
             self._logger.exception(
-                "document_vault_notification_failed",
+                "entity_archive_event_failed",
                 extra={"entity_id": str(entity.id), "entity_type": entity.type.value},
             )
         return entity

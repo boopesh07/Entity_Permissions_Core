@@ -6,6 +6,7 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
 
 - FastAPI-based REST service with stateless authorization endpoint (`POST /api/v1/authorize`).
 - SQLAlchemy models for entities, roles, permissions, role assignments, and audit logs.
+- Events engine that normalizes, persists, and publishes outbound domain events.
 - Append-only, hash-chained audit ledger with tamper detection and replay verification.
 - Hierarchical permission inheritance across parent/child entities.
 - Structured JSON logging suitable for CloudWatch ingestion.
@@ -62,7 +63,7 @@ You should see the following logs:
 
 - `audit_event` entries for `entity.create` and `entity.archive`
 - `entity_created` / `entity_archived` info logs
-- `document_vault_event_published` when `EPR_DOCUMENT_VAULT_TOPIC_ARN` is set (or `document_vault_event_skipped` if left empty)
+- `events_engine_published` when `EPR_DOCUMENT_VAULT_TOPIC_ARN` is set (or `events_engine_publish_skipped` if left empty)
 
 ### Authorization Model Highlights
 
@@ -85,10 +86,78 @@ The service is configured via the `AppSettings` class in `app/core/config.py`. K
 - `EPR_REDIS_TOKEN` (Upstash REST token, required in production)
 - `EPR_REDIS_CACHE_PREFIX` (default: `epr`)
 - `EPR_REDIS_CACHE_TTL` (default: `300`, seconds)
-- `EPR_DOCUMENT_VAULT_TOPIC_ARN` (SNS topic for entity deletion events)
+- `EPR_DOCUMENT_VAULT_TOPIC_ARN` (SNS topic for outbound domain events; optional locally)
 - `EPR_DOCUMENT_EVENT_SOURCE` (default: `entity_permissions_core`)
 - `EPR_AUDIT_SQS_URL` (only required for the background consumer)
 - `EPR_AUDIT_SQS_MAX_MESSAGES`, `EPR_AUDIT_SQS_WAIT_TIME`, `EPR_AUDIT_SQS_VISIBILITY_TIMEOUT` (optional tunables)
+
+## Event & Workflow Engine (EWE)
+
+The Events Engine (`app/events_engine`) centralizes outbound event emission and inbound ingestion. The companion Workflow Engine (`app/workflow_engine`) is scaffolded for Temporal-based automation.
+
+### Responsibilities
+
+- Normalize outbound events into a canonical envelope and persist them.
+- Publish events to SNS (using `EPR_DOCUMENT_VAULT_TOPIC_ARN`) with consistent attributes.
+- Maintain the `platform_events` table for deterministic replay and auditability.
+- Consume audit events from SQS via `AuditSQSEventConsumer`, feeding `AuditService`.
+- Provide registry/starter hooks for future workflow orchestration.
+
+### Key Workflows
+
+- **Entity Cascade Archive** – triggered by `entity.archived` when an entity is soft-archived. Downstream services subscribe to this event to revoke permissions, archive documents, or launch workflows.
+- **Audit Ingestion** – SNS → SQS audit events are drained by the new consumer module and appended to the hash-chained `audit_logs` table.
+- **Permission Change Automations (planned)** – workflow stubs exist to coordinate cache invalidation or long-running tasks once Temporal integration lands.
+
+### Architecture Overview
+
+```
+EntityService.archive ──► EventDispatcher.publish_event ──► SNS Topic (EPR_DOCUMENT_VAULT_TOPIC_ARN)
+                                  │
+                                  └─► platform_events table (immutable ledger)
+
+SNS (EPR audit topic) ─► SQS (EPR_AUDIT_SQS_URL) ─► AuditSQSEventConsumer ─► AuditService.record_event
+```
+
+### Data Model
+
+- **platform_events** – immutable ledger storing envelope fields (`event_id`, `event_type`, `source`, `occurred_at`, `payload`, `context`, etc.) plus indexes on `event_type` and `occurred_at`.
+- **Audit tables** – unchanged; still enforce the hash chain for inbound audit events.
+
+If you manage schema manually, apply the following SQL (PostgreSQL):
+
+```sql
+CREATE TABLE platform_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id VARCHAR(128) UNIQUE NOT NULL,
+    event_type VARCHAR(128) NOT NULL,
+    source VARCHAR(128) NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    correlation_id VARCHAR(128),
+    schema_version VARCHAR(16) NOT NULL DEFAULT 'v1',
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ix_platform_events_event_type ON platform_events (event_type);
+CREATE INDEX ix_platform_events_occurred_at ON platform_events (occurred_at);
+```
+
+### Module Tour
+
+- `app/events_engine/dispatcher.py` – high-level API; use `get_event_dispatcher()` to emit events.
+- `app/events_engine/publisher.py` – transport abstraction (`SnsEventPublisher` / `NullEventPublisher`).
+- `app/events_engine/consumers/base.py` – reusable SQS polling with SNS envelope handling.
+- `app/events_engine/consumers/audit.py` – audit ingestion wired through the dispatcher.
+- `app/workflow_engine/registry.py` & `starter.py` – placeholders for registering and launching Temporal workflows.
+
+### Testing
+
+- Engine coverage lives in `tests/events_engine/` (dispatcher, integration with EntityService, consumer utilities, audit handler).
+- Workflow scaffolding is verified in `tests/workflow_engine/`.
+- Existing API/domain tests reuse a dispatcher stub defined in `tests/conftest.py`.
 
 ## REST API Overview
 
@@ -143,21 +212,25 @@ python -m app.workers.audit_consumer
 
 The worker long-polls SQS, validates each message against the `AuditEvent` schema, writes it through `AuditService`, and deletes the message on success. Messages that raise exceptions remain in-flight so SQS retry and DLQ policies apply.
 
-## Document-vault consumer
+## Event consumers
 
-Entity archives emit `entity.deleted` events to the `EPR_DOCUMENT_VAULT_TOPIC_ARN` topic (production ARN: `arn:aws:sns:us-east-1:116981763412:epr-document-events`). Subscribe your downstream queue/Lambda/HTTP endpoint to that topic. Sample payload:
+Entity archives emit `entity.archived` events to the `EPR_DOCUMENT_VAULT_TOPIC_ARN` topic (production ARN: `arn:aws:sns:us-east-1:116981763412:epr-document-events`). Subscribe your downstream queue/Lambda/HTTP endpoint to that topic. Sample payload:
 
 ```json
 {
   "event_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "event_type": "entity.archived",
   "source": "entity_permissions_core",
-  "action": "entity.deleted",
-  "entity_id": "<ENTITY_UUID>",
-  "entity_type": "issuer"
+  "occurred_at": "2025-10-30T21:11:00Z",
+  "payload": {
+    "entity_id": "<ENTITY_UUID>",
+    "entity_type": "issuer"
+  },
+  "context": {}
 }
 ```
 
-Use the `entity_id`/`entity_type` pair to cascade document archival or deletion, then acknowledge the message (e.g., delete it from SQS).
+Use the payload to cascade document archival, invalidate caches, or trigger workflows. Remove messages from your queue (e.g., SQS `DeleteMessage`) after successful processing.
 
 ---
 

@@ -6,7 +6,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_session
-from app.services import notifications
+from app.events_engine import get_event_dispatcher
 from app.services.authorization import AuthorizationService
 from app.services.cache import get_permission_cache
 from app.services.entities import EntityService
@@ -18,7 +18,7 @@ def get_db_session() -> Session:
 
 
 def get_entity_service(session: Session = Depends(get_db_session)) -> EntityService:
-    return EntityService(session, document_publisher=notifications.get_document_publisher())
+    return EntityService(session, event_dispatcher=get_event_dispatcher())
 
 
 def get_role_service(session: Session = Depends(get_db_session)) -> RoleService:
