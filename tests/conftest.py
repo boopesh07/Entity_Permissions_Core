@@ -32,7 +32,9 @@ def reset_database():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     cache_module._shared_cache = cache_module.InMemoryPermissionCache()
-    set_event_dispatcher(EventDispatcher(publisher=NullEventPublisher(), default_source="entity_permissions_core"))
+    set_event_dispatcher(
+        EventDispatcher(publisher=NullEventPublisher(), default_source="entity_permissions_core", max_attempts=2)
+    )
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -56,9 +58,11 @@ def event_dispatcher_stub(monkeypatch):
             self.envelopes.append(envelope)
 
     publisher = StubPublisher()
-    dispatcher = EventDispatcher(publisher=publisher, default_source="entity_permissions_core")
+    dispatcher = EventDispatcher(publisher=publisher, default_source="entity_permissions_core", max_attempts=2)
     dispatcher.stub_publisher = publisher  # type: ignore[attr-defined]
     dispatcher_module.set_event_dispatcher(dispatcher)
     yield dispatcher
-    dispatcher_module.set_event_dispatcher(EventDispatcher(publisher=NullEventPublisher(), default_source="entity_permissions_core"))
+    dispatcher_module.set_event_dispatcher(
+        EventDispatcher(publisher=NullEventPublisher(), default_source="entity_permissions_core", max_attempts=2)
+    )
 warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module="starlette.formparsers")

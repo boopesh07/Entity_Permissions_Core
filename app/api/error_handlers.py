@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.events_engine.service import EventNotFoundError, EventServiceError
 from app.services.authorization import EntityNotFoundError as AuthEntityNotFoundError
 from app.services.entities import EntityConflictError, EntityNotFoundError
 from app.services.roles import (
@@ -48,3 +49,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RoleServiceError)
     async def role_service_handler(request: Request, exc: RoleServiceError) -> JSONResponse:  # noqa: WPS430
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(EventNotFoundError)
+    async def event_not_found_handler(request: Request, exc: EventNotFoundError) -> JSONResponse:  # noqa: WPS430
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(EventServiceError)
+    async def event_service_error_handler(request: Request, exc: EventServiceError) -> JSONResponse:  # noqa: WPS430
+        return JSONResponse(status_code=502, content={"detail": str(exc)})

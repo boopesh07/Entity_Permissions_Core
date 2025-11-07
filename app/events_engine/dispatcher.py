@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.events_engine.config import get_event_engine_config
 from app.events_engine.publisher import EventPublisher, NullEventPublisher, SnsEventPublisher
 from app.events_engine.schemas import EventEnvelope
-from app.models.platform_event import PlatformEvent
+from app.models.platform_event import DeliveryState, PlatformEvent
 
 _dispatcher: Optional["EventDispatcher"] = None
 
@@ -27,9 +27,11 @@ class EventDispatcher:
         *,
         publisher: EventPublisher,
         default_source: str,
+        max_attempts: int = 2,
     ) -> None:
         self._publisher = publisher
         self._default_source = default_source
+        self._max_attempts = max_attempts
 
     def publish_event(
         self,
@@ -68,17 +70,53 @@ class EventDispatcher:
         session.add(record)
         session.flush()
 
-        self._publisher.publish(envelope)
-
-        LOGGER.info(
-            "events_engine_published",
-            extra={
-                "event_id": str(envelope.event_id),
-                "event_type": envelope.event_type,
-                "source": envelope.source,
-            },
-        )
+        self._publish_with_retry(session, record, envelope)
         return record
+
+    def _publish_with_retry(self, session: Session, record: PlatformEvent, envelope: EventEnvelope) -> None:
+        attempts = 0
+        last_error: Optional[Exception] = None
+
+        while attempts < self._max_attempts:
+            try:
+                self._publisher.publish(envelope)
+                record.delivery_state = DeliveryState.SUCCEEDED
+                record.delivery_attempts = attempts + 1
+                record.last_error = None
+                session.add(record)
+                session.flush()
+                LOGGER.info(
+                    "events_engine_published",
+                    extra={
+                        "event_id": str(envelope.event_id),
+                        "event_type": envelope.event_type,
+                        "source": envelope.source,
+                        "attempts": attempts + 1,
+                    },
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                attempts += 1
+                last_error = exc
+                record.delivery_attempts = attempts
+                record.last_error = str(exc)
+                record.delivery_state = (
+                    DeliveryState.FAILED if attempts >= self._max_attempts else DeliveryState.PENDING
+                )
+                session.add(record)
+                session.flush()
+                LOGGER.exception(
+                    "events_engine_publish_failed",
+                    extra={
+                        "event_id": str(envelope.event_id),
+                        "event_type": envelope.event_type,
+                        "source": envelope.source,
+                        "attempt": attempts,
+                    },
+                )
+
+        assert last_error is not None
+        raise last_error
 
 
 def get_event_dispatcher() -> EventDispatcher:
@@ -99,7 +137,11 @@ def get_event_dispatcher() -> EventDispatcher:
     else:
         publisher = NullEventPublisher()
 
-    _dispatcher = EventDispatcher(publisher=publisher, default_source=config.source)
+    _dispatcher = EventDispatcher(
+        publisher=publisher,
+        default_source=config.source,
+        max_attempts=settings.event_publish_attempts,
+    )
     return _dispatcher
 
 

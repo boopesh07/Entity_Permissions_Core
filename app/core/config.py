@@ -43,6 +43,12 @@ class AppSettings(BaseSettings):
     redis_cache_ttl: int = Field(default=300)
     document_vault_topic_arn: str | None = Field(default=None)
     document_event_source: str = Field(default="entity_permissions_core")
+    event_publish_attempts: int = Field(default=2)
+    temporal_host: str | None = Field(default=None)
+    temporal_namespace: str | None = Field(default=None)
+    temporal_api_key: str | None = Field(default=None)
+    temporal_task_queue: str = Field(default="omen-workflows")
+    temporal_tls_enabled: bool = Field(default=True)
 
     @field_validator("log_level")
     @classmethod
@@ -58,7 +64,15 @@ class AppSettings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
-    @field_validator("redis_url", "redis_token", "document_vault_topic_arn", mode="before")
+    @field_validator(
+        "redis_url",
+        "redis_token",
+        "document_vault_topic_arn",
+        "temporal_host",
+        "temporal_namespace",
+        "temporal_api_key",
+        mode="before",
+    )
     @classmethod
     def empty_string_to_none(cls, value: str | None) -> str | None:
         if value == "":

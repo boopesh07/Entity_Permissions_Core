@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Index, String
+from sqlalchemy import Enum as SqlEnum
+from sqlalchemy import Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
 from app.models.types import GUID, JSONType
+
+
+class DeliveryState(str, Enum):
+    """Outbox delivery state."""
+
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
 
 
 class PlatformEvent(TimestampMixin, Base):
@@ -31,3 +41,10 @@ class PlatformEvent(TimestampMixin, Base):
     schema_version: Mapped[str] = mapped_column(String(length=16), nullable=False, default="v1")
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     context: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    delivery_state: Mapped[DeliveryState] = mapped_column(
+        SqlEnum(DeliveryState, name="platform_event_delivery_state", native_enum=False),
+        nullable=False,
+        default=DeliveryState.PENDING,
+    )
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(String(length=1024), nullable=True)

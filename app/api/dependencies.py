@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_session
 from app.events_engine import get_event_dispatcher
+from app.events_engine.service import EventService
 from app.services.authorization import AuthorizationService
 from app.services.cache import get_permission_cache
 from app.services.entities import EntityService
@@ -29,3 +30,7 @@ def get_role_service(session: Session = Depends(get_db_session)) -> RoleService:
 def get_authorization_service(session: Session = Depends(get_db_session)) -> AuthorizationService:
     cache = get_permission_cache()
     return AuthorizationService(session, cache=cache)
+
+
+def get_event_service(session: Session = Depends(get_db_session)) -> EventService:
+    return EventService(session, dispatcher=get_event_dispatcher())

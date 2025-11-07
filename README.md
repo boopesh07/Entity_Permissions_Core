@@ -90,6 +90,10 @@ The service is configured via the `AppSettings` class in `app/core/config.py`. K
 - `EPR_DOCUMENT_EVENT_SOURCE` (default: `entity_permissions_core`)
 - `EPR_AUDIT_SQS_URL` (only required for the background consumer)
 - `EPR_AUDIT_SQS_MAX_MESSAGES`, `EPR_AUDIT_SQS_WAIT_TIME`, `EPR_AUDIT_SQS_VISIBILITY_TIMEOUT` (optional tunables)
+- `EPR_EVENT_PUBLISH_ATTEMPTS` (default: `2`)
+- `EPR_TEMPORAL_HOST`, `EPR_TEMPORAL_NAMESPACE`, `EPR_TEMPORAL_API_KEY` (required to enable Temporal workflows)
+- `EPR_TEMPORAL_TASK_QUEUE` (default: `omen-workflows`)
+- `EPR_TEMPORAL_TLS_ENABLED` (default: `true`)
 
 ## Event & Workflow Engine (EWE)
 
@@ -100,8 +104,9 @@ The Events Engine (`app/events_engine`) centralizes outbound event emission and 
 - Normalize outbound events into a canonical envelope and persist them.
 - Publish events to SNS (using `EPR_DOCUMENT_VAULT_TOPIC_ARN`) with consistent attributes.
 - Maintain the `platform_events` table for deterministic replay and auditability.
+- Expose `/api/v1/events` so upstream systems (Document Vault, onboarding flows, etc.) can ingest events directly with idempotency guarantees.
 - Consume audit events from SQS via `AuditSQSEventConsumer`, feeding `AuditService`.
-- Provide registry/starter hooks for future workflow orchestration.
+- Trigger Temporal workflows for entity, document, and permission lifecycle automations.
 
 ### Key Workflows
 
@@ -137,21 +142,94 @@ CREATE TABLE platform_events (
     schema_version VARCHAR(16) NOT NULL DEFAULT 'v1',
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    delivery_state VARCHAR(16) NOT NULL DEFAULT 'pending',
+    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error VARCHAR(1024),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX ix_platform_events_event_type ON platform_events (event_type);
 CREATE INDEX ix_platform_events_occurred_at ON platform_events (occurred_at);
+
+ALTER TABLE platform_events
+    ADD CONSTRAINT ck_platform_events_delivery_state
+        CHECK (delivery_state IN ('pending', 'succeeded', 'failed'));
+```
+
+### Event Ingestion API
+
+The Event Engine now exposes `/api/v1/events`:
+
+- **POST `/api/v1/events`** – ingest an event. The service generates `event_id`, persists the record, publishes it to SNS with an outbox retry loop (2 attempts), and returns the delivery state. Provide `correlation_id` for idempotency.
+- **GET `/api/v1/events`** – paginate/filter by `event_type` or `source` to inspect recent events.
+- **GET `/api/v1/events/{event_id}`** – retrieve a specific event and its delivery metadata.
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/events \
+  -H "Content-Type: application/json" \
+  -d '{
+        "event_type": "document.verified",
+        "source": "document_vault",
+        "payload": {"document_id": "abc-123"},
+        "context": {"actor_id": "user-42"},
+        "correlation_id": "doc-abc-123"
+      }'
 ```
 
 ### Module Tour
 
-- `app/events_engine/dispatcher.py` – high-level API; use `get_event_dispatcher()` to emit events.
+- `app/events_engine/service.py` – ingestion, dedupe, and query helpers backing the REST API.
+- `app/events_engine/dispatcher.py` – persists events and publishes them with built-in retry/outbox state.
 - `app/events_engine/publisher.py` – transport abstraction (`SnsEventPublisher` / `NullEventPublisher`).
 - `app/events_engine/consumers/base.py` – reusable SQS polling with SNS envelope handling.
 - `app/events_engine/consumers/audit.py` – audit ingestion wired through the dispatcher.
-- `app/workflow_engine/registry.py` & `starter.py` – placeholders for registering and launching Temporal workflows.
+- `app/workflow_orchestration/` – Temporal workflows, activities, and orchestration helpers.
+
+### Workflow Orchestration
+
+Configure `EPR_TEMPORAL_HOST`, `EPR_TEMPORAL_NAMESPACE`, `EPR_TEMPORAL_API_KEY`, and optional `EPR_TEMPORAL_TASK_QUEUE`, then start the worker locally:
+
+```bash
+python -m app.workflow_orchestration.worker
+```
+
+The orchestrator automatically reacts to:
+
+| Event Type | Workflow |
+|------------|----------|
+| `entity.archived` | `EntityCascadeArchiveWorkflow` – archives vault documents & invalidates permissions. |
+| `document.verified` | `DocumentVerifiedWorkflow` – simulates receipt issuance. |
+| `role.assignment.changed`, `role.updated` | `PermissionChangeWorkflow` – clears authorization caches. |
+
+If Temporal is not configured, workflow dispatch is skipped but events are still persisted and published.
+
+#### Module layout
+
+| Path | Responsibility |
+|------|----------------|
+| `app/workflow_orchestration/config.py` | Loads Temporal host/namespace/API key/task queue settings (`EPR_TEMPORAL_*`). |
+| `app/workflow_orchestration/client.py` | Creates authenticated Temporal clients (TLS on by default). |
+| `app/workflow_orchestration/activities.py` | Side-effecting activities (document archival, cache invalidation, receipt issuance). Extend these to integrate with real downstream services. |
+| `app/workflow_orchestration/workflows/` | Deterministic workflow definitions orchestrating the activities. |
+| `app/workflow_orchestration/orchestrator.py` | Maps platform events to workflow classes and starts them with deterministic IDs (`<WorkflowName>-<event_id>`). |
+| `app/workflow_orchestration/worker.py` | Boots a Temporal worker that registers all workflows/activities against the configured task queue. |
+
+#### Running the worker in other environments
+
+1. Export the Temporal credentials (see **Environment Variables** above).  
+2. Use the same container image as the API, but override the command to `python -m app.workflow_orchestration.worker`.  
+3. Ensure outbound network access to `EPR_TEMPORAL_HOST` (`us-east-1.aws.api.temporal.io:7233` in production) and that the API key has workflow create permissions.  
+4. Monitor worker logs for `workflow_started`, `workflow_issue_receipt`, etc. Failures are surfaced as `workflow_start_failed` or activity logs; Temporal will also surface them in its UI.
+
+#### Observability & replay
+
+- Every ingested event is written to `platform_events` with `delivery_state` (`pending`, `succeeded`, `failed`) and `delivery_attempts`. Failed publishes bubble up to the caller and remain flagged for manual replay.  
+- Workflow launches log `workflow_started`; if Temporal is disabled in an environment, the orchestrator logs `workflow_skipped_temporal_disabled` but the REST API still returns `201`.  
+- Use `/api/v1/events/{event_id}` to inspect the payload passed into a workflow or to derive a deterministic workflow ID for replaying via the Temporal CLI/UI.  
+- To manually replay, re-POST the event with the same `correlation_id` (ingestion will return the existing row) and use the persisted payload to start a workflow run via Temporal tooling.
 
 ### Testing
 
@@ -171,6 +249,8 @@ CREATE INDEX ix_platform_events_occurred_at ON platform_events (occurred_at);
 | `/api/v1/assignments` | POST/GET | Assign roles to principals |
 | `/api/v1/assignments/{id}` | DELETE | Revoke a role assignment |
 | `/api/v1/authorize` | POST | Stateless authorization check |
+| `/api/v1/events` | POST/GET | Ingest or list platform events |
+| `/api/v1/events/{event_id}` | GET | Fetch a specific event |
 
 Duplicate entity or role POSTs return `409 Conflict` with a descriptive message. Use the list endpoints to discover existing resources before creating new ones.
 
