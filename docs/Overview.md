@@ -106,7 +106,7 @@ All mutating endpoints accept an optional `X-Actor-Id` header to attribute audit
 - **External Identity Enrichment** – Join cached identity metadata (names, emails, group memberships) for richer audit logging.
 - **Event Publishing** – Emit role/assignment change events to EventBridge or SNS for downstream notification systems.
 - **Attribute-Based Access Control (ABAC)** – Extend assignments with contextual rules (e.g., jurisdiction, investment size).
-- **Bulk Administration APIs** – Import/export roles and assignments to streamline large tenant migrations.
+- **Bulk Administration APIs** – Import/export roles and assignments to streamline large tenant onboarding.
 - **Continuous Authorization Monitoring** – Scheduled jobs to detect stale assignments, soon-to-expire access, or orphaned entities.
 
 ---

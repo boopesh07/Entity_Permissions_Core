@@ -39,6 +39,10 @@ Both containers run in the same ECS task, sharing:
    export AWS_SECRET_ACCESS_KEY=...
    ```
 
+## Database Schema Management
+
+During the prototype phase the database schema is managed manually (e.g., directly inside Supabase). Apply any required DDL before deploying because containers no longer run migrations on startup.
+
 ## Environment Variables
 
 Create a `.env` file or export these variables:
@@ -365,4 +369,3 @@ For issues or questions:
 - Review ECS Events in console
 - Verify environment variable configuration
 - Contact platform team
-

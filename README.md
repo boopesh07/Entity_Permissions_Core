@@ -12,7 +12,7 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
 - Structured JSON logging suitable for CloudWatch ingestion.
 - Authorization caching backed by Upstash Redis with per-principal invalidation.
 - SNS notifications to the document vault service when entities are archived.
-- Alembic migrations and ECS-ready Docker packaging.
+- ECS-ready Docker packaging.
 
 ## Local Development
 
@@ -27,25 +27,22 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
   - Set `EPR_DATABASE_URL` to your target database (defaults to a local SQLite file).
   - Provide `EPR_REDIS_URL`/`EPR_REDIS_TOKEN` if you want to exercise the shared authorization cache locally (falls back to in-memory when omitted).
 
-3. **Run database migrations**
-   ```bash
-   EPR_DATABASE_URL="postgresql://..." .venv/bin/alembic upgrade head
-   ```
-
-4. **Start the API**
+3. **Start the API**
    ```bash
    EPR_DATABASE_URL="postgresql://..." .venv/bin/uvicorn app.main:app --reload --port 8000
    ```
 
-5. **Verify the service**
+4. **Verify the service**
    ```bash
    curl -sSf http://localhost:8000/healthz
    ```
 
-6. **Run the tests**
+5. **Run the tests**
    ```bash
    .venv/bin/pytest -vv
    ```
+
+> **Schema changes**: Database schema updates are managed manually (e.g., directly in Supabase). Make sure any manual DDL updates are reflected in the SQLAlchemy models before running the application.
 
 ### Quick local smoke test
 
@@ -178,6 +175,36 @@ curl -X POST http://localhost:8000/api/v1/events \
         "correlation_id": "doc-abc-123"
       }'
 ```
+
+#### How other services should publish events
+
+1. **Identify the event** – choose a descriptive `event_type` (`document.verified`, `permission.revoked`, etc.) and a stable `source` (e.g., `document_vault`).  
+2. **Build the payload** – include only JSON-safe data needed by downstream consumers. Large blobs or PII should live elsewhere.  
+3. **Provide `correlation_id`** – use a deterministic identifier (document ID, job ID) so retries return the original event instead of duplicating it.  
+4. **POST to `/api/v1/events`** – include the payload above; the Event Engine will generate `event_id`, persist the ledger entry, publish to SNS, and trigger any mapped workflows.  
+5. **Handle responses** – a `201` response includes `delivery_state`. If it is `failed`, log the `last_error` and retry later.  
+6. **Security** – ensure the calling service authenticates the request the same way it accesses other EPR APIs (e.g., private networking, API gateway tokens, etc.).
+
+Example (Document Vault):
+
+```bash
+curl -X POST https://epr.api.internal/api/v1/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <SERVICE_TOKEN>" \
+  -d '{
+        "event_type": "document.verified",
+        "source": "document_vault",
+        "payload": {
+          "document_id": "doc_123",
+          "issuer_id": "issuer_456",
+          "verified_by": "user_999"
+        },
+        "context": {"actor_id": "user_999"},
+        "correlation_id": "document_vault:doc_123:verification"
+      }'
+```
+
+Any future microservice can follow the same pattern: define the event, include a correlation identifier, and call `/api/v1/events`. The Event Engine handles persistence, SNS fan-out, and workflow orchestration.
 
 ### Module Tour
 
@@ -317,9 +344,9 @@ Use the payload to cascade document archival, invalidate caches, or trigger work
 ## Deployment Review & Self-Check (2025-10)
 
 - **ALB integration confirmed** – The ECS service now fronts the API through the public ALB `epr-alb`. Listener `:80` forwards to target group `epr-tg` on container port `8080`. Security groups are locked down so only the ALB SG (`sg-016730c5005c5c7b1`) can reach the task SG (`sg-09b1c41ac8c1d448d`) on `8080`.
-- **Health checks verified** – `/healthz` responds with 200 once migrations complete. We tailed `/ecs/omen-epr` logs to confirm startup and applied a health-check grace period as needed during troubleshooting.
+- **Health checks verified** – `/healthz` responds with 200 once the API finishes booting. We tailed `/ecs/omen-epr` logs to confirm startup and applied a health-check grace period as needed during troubleshooting.
 - **Operational smoke test** – `curl http://epr-alb-509503971.us-east-1.elb.amazonaws.com/healthz` returns `{"status":"ok"}`, demonstrating end-to-end connectivity through the load balancer.
-- **Action items** – Keep `.env` values (`ECS_SUBNET_IDS`, `ECS_SECURITY_GROUP_IDS`) aligned with the active service configuration before running helper scripts; update the health-check grace period if future migrations extend startup time.
+- **Action items** – Keep `.env` values (`ECS_SUBNET_IDS`, `ECS_SECURITY_GROUP_IDS`) aligned with the active service configuration before running helper scripts; update the health-check grace period if startup time changes.
 
 No code changes were required for this validation pass; the work consisted of infrastructure wiring, log inspection, and operational verification.
 
@@ -379,7 +406,7 @@ Then run:
 ./scripts/deploy.sh
 ```
 
-The script builds/pushes the image (unless `SKIP_BUILD=true`), renders `infra/ecs-task-def.json.template`, registers a new task definition, and updates or creates the ECS service. On startup, each task executes `alembic upgrade head` before launching Uvicorn.
+The script builds/pushes the image (unless `SKIP_BUILD=true`), renders `infra/ecs-task-def.json.template`, registers a new task definition, and updates or creates the ECS service. On startup, each task now launches Uvicorn directly—ensure your database schema updates have already been applied manually (e.g., via Supabase) before deploying.
 
 **📖 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for comprehensive deployment guide, troubleshooting, and monitoring instructions.**
 
@@ -395,14 +422,16 @@ For direct testing against a task ENI (public subnet only), ensure the security 
 
 ### Schema changes
 
-1. Modify the SQLAlchemy models.
-2. Generate a migration: `alembic revision --autogenerate -m "describe change"`.
-3. Review the migration file and apply it locally: `alembic upgrade head`.
-4. Commit the code + migration and deploy. The production tasks will run `alembic upgrade head` automatically during startup.
+During the prototype phase all database schema changes are performed manually:
+
+1. Update the SQLAlchemy models to reflect the desired columns/constraints.
+2. Apply the equivalent DDL directly in Supabase (or your chosen database console).
+3. Deploy the service once the target environment has the updated schema.
+
+Because migrations are not automated, double-check that each environment’s schema matches the models before shipping new features.
 
 ## Development Notes
 
-- Alembic migration templates live in `alembic/versions`.
 - Structured logging is configured in `app/core/logging.py`.
 - Tests use in-memory SQLite with pooled connections.
 

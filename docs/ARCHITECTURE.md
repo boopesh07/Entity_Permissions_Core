@@ -33,7 +33,7 @@ The Entity & Permissions Core (EPR) powers authorization decisions for the Omen 
 - **API Layer (FastAPI)**: Request validation (Pydantic), routing, and error handling. API surface includes entity CRUD, role management, assignment management, and authorization checks.
 - **Service Layer**: Implements business logic — entity lifecycle, consistent role/permission updates, and evaluation of authorization requests. Exposes transaction-safe use cases.
 - **AuthZ Engine**: Resolves permissions by evaluating role assignments, inherited entity relationships, and resource-context rules.
-- **Persistence Layer**: SQLAlchemy ORM models. Uses migrations (Alembic) for schema evolution. SQLite for local/dev tests, PostgreSQL in production.
+- **Persistence Layer**: SQLAlchemy ORM models with schema changes managed manually (e.g., via Supabase) during the prototype phase. SQLite for local/dev tests, PostgreSQL in production.
 - **Settings & DI**: Pydantic `BaseSettings` loads configuration from environment variables (database URL, logging level, etc.). Dependency injection wires sessions and services.
 - **Logging & Audit**: Python `logging` with JSON formatting for machine readability. Hooks write audit trails to the database and to stdout for shipping to CloudWatch.
 

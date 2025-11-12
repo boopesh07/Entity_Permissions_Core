@@ -12,6 +12,3 @@ tests:
 
 run:
 	.venv/bin/uvicorn app.main:app --reload --port 8000
-
-migrate:
-	$(PYTHON) -m alembic upgrade head
