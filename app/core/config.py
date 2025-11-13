@@ -49,6 +49,7 @@ class AppSettings(BaseSettings):
     temporal_api_key: str | None = Field(default=None)
     temporal_task_queue: str = Field(default="omen-workflows")
     temporal_tls_enabled: bool = Field(default=True)
+    document_vault_service_url: str | None = Field(default=None)
 
     @field_validator("log_level")
     @classmethod
@@ -71,6 +72,7 @@ class AppSettings(BaseSettings):
         "temporal_host",
         "temporal_namespace",
         "temporal_api_key",
+        "document_vault_service_url",
         mode="before",
     )
     @classmethod
