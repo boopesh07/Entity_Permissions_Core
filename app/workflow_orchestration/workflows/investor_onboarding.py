@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any, Dict
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from app.workflow_orchestration import tokenization_activities
@@ -43,7 +44,7 @@ class InvestorOnboardingWorkflow:
             tokenization_activities.verify_kyc_documents_activity,
             {"investor_id": investor_id},
             start_to_close_timeout=timedelta(hours=48),
-            retry_policy=workflow.RetryPolicy(
+            retry_policy=RetryPolicy(
                 maximum_attempts=3,
                 initial_interval=timedelta(minutes=1),
             ),
@@ -66,7 +67,7 @@ class InvestorOnboardingWorkflow:
             tokenization_activities.create_investor_wallet_activity,
             {"investor_id": investor_id},
             start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=workflow.RetryPolicy(maximum_attempts=3),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )
         
         # Step 3: Upgrade investor permissions
@@ -99,5 +100,4 @@ class InvestorOnboardingWorkflow:
     async def kyc_documents_uploaded_signal(self) -> None:
         """Signal that KYC documents have been uploaded."""
         self.kyc_documents_uploaded = True
-
 

@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any, Dict
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from app.workflow_orchestration import tokenization_activities
@@ -45,7 +46,7 @@ class PropertyOnboardingWorkflow:
             tokenization_activities.verify_property_documents_activity,
             {"property_id": property_id},
             start_to_close_timeout=timedelta(hours=24),
-            retry_policy=workflow.RetryPolicy(
+            retry_policy=RetryPolicy(
                 maximum_attempts=3,
                 initial_interval=timedelta(seconds=10),
             ),
@@ -63,7 +64,7 @@ class PropertyOnboardingWorkflow:
                 "property_details": verification_result["property_details"],
             },
             start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=workflow.RetryPolicy(maximum_attempts=3),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )
         
         # Step 3: Mint tokens
@@ -75,7 +76,7 @@ class PropertyOnboardingWorkflow:
                 "total_tokens": verification_result["property_details"]["total_tokens"],
             },
             start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=workflow.RetryPolicy(maximum_attempts=3),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )
         
         # Step 4: Activate property
@@ -106,5 +107,4 @@ class PropertyOnboardingWorkflow:
     async def documents_uploaded_signal(self) -> None:
         """Signal that property documents have been uploaded."""
         self.documents_uploaded = True
-
 
