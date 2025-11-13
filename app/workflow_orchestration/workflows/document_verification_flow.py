@@ -33,6 +33,7 @@ class DocumentVerificationWorkflow:
         document_id: str,
         entity_id: str,
         document_type: str,
+        verifier_id: str = None,
     ) -> str:
         """
         Execute document verification workflow.
@@ -41,14 +42,21 @@ class DocumentVerificationWorkflow:
             document_id: Document identifier
             entity_id: Associated entity ID
             document_type: Type of document
+            verifier_id: ID of entity performing verification (agent, owner, etc.)
         
         Returns:
             Workflow completion status
         """
+        # Use entity_id as verifier_id if not provided (fallback)
+        verifier = verifier_id or entity_id
+        
         # Step 1: Automated verification
         auto_verify_result = await workflow.execute_activity(
             tokenization_activities.automated_document_verification_activity,
-            {"document_id": document_id},
+            {
+                "document_id": document_id,
+                "verifier_id": verifier,
+            },
             start_to_close_timeout=timedelta(minutes=10),
         )
         

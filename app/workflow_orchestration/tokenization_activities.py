@@ -540,8 +540,12 @@ async def publish_platform_event_activity(payload: Dict[str, Any]) -> Dict[str, 
             payload=event_payload,
         )
         session.commit()
+        
+        # Access attributes BEFORE session closes to avoid DetachedInstanceError
+        event_id = event_record.event_id
+        event_type_value = event_type
     
-    return {"event_id": event_record.event_id, "event_type": event_type}
+    return {"event_id": event_id, "event_type": event_type_value}
 
 
 @activity.defn(name="automated_document_verification_activity")
@@ -550,21 +554,32 @@ async def automated_document_verification_activity(payload: Dict[str, Any]) -> D
     Perform automated document verification checks.
     
     Integrates with DocumentVaultService /verify endpoint.
+    
+    Payload should contain:
+    - document_id: UUID of document to verify
+    - verifier_id: UUID of entity performing verification (agent, owner, etc.)
     """
     from app.services.document_vault_client import DocumentVaultError, get_document_vault_client
     
     document_id = payload["document_id"]
+    verifier_id = payload["verifier_id"]
     
     logger.info(
         "workflow_automated_document_verification",
-        extra={"document_id": document_id},
+        extra={
+            "document_id": document_id,
+            "verifier_id": verifier_id,
+        },
     )
     
     # Call DocumentVault API to verify the document
     vault_client = get_document_vault_client()
     
     try:
-        result = await vault_client.verify_document(document_id)
+        result = await vault_client.verify_document(
+            document_id=document_id,
+            verifier_id=verifier_id,
+        )
         
         status = result.get("status", "unknown")
         passed = status == "verified"
@@ -573,6 +588,7 @@ async def automated_document_verification_activity(payload: Dict[str, Any]) -> D
             "workflow_document_verification_complete",
             extra={
                 "document_id": document_id,
+                "verifier_id": verifier_id,
                 "status": status,
                 "passed": passed,
             },
@@ -593,6 +609,7 @@ async def automated_document_verification_activity(payload: Dict[str, Any]) -> D
             "workflow_document_verification_error",
             extra={
                 "document_id": document_id,
+                "verifier_id": verifier_id,
                 "error": str(exc),
             },
         )

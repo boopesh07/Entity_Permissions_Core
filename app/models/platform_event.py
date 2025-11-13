@@ -42,7 +42,12 @@ class PlatformEvent(TimestampMixin, Base):
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     context: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     delivery_state: Mapped[DeliveryState] = mapped_column(
-        SqlEnum(DeliveryState, name="platform_event_delivery_state", native_enum=False),
+        SqlEnum(
+            DeliveryState,
+            name="platform_event_delivery_state",
+            native_enum=False,
+            values_callable=lambda enum: [state.value for state in enum],
+        ),
         nullable=False,
         default=DeliveryState.PENDING,
     )

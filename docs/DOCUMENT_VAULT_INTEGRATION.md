@@ -40,10 +40,12 @@ If `DOCUMENT_VAULT_SERVICE_URL` is not set or is empty:
 
 **API Call:**
 - Checks for verified documents for a property entity
-- Endpoint: `GET /api/v1/documents?entity_id={property_id}&status=verified`
+- Endpoint: `GET /api/v1/documents/{property_id}`
 
 **Behavior:**
-- Returns `approved: true` if property has verified documents
+- Retrieves all documents for the property
+- Checks if any document has `status: "verified"`
+- Returns `approved: true` if property has at least one verified document
 - Returns `approved: false` if no verified documents found
 - Auto-approves if DocumentVault service is unavailable
 
@@ -53,10 +55,12 @@ If `DOCUMENT_VAULT_SERVICE_URL` is not set or is empty:
 
 **API Call:**
 - Checks for verified KYC documents for an investor entity
-- Endpoint: `GET /api/v1/documents?entity_id={investor_id}&status=verified`
+- Endpoint: `GET /api/v1/documents/{investor_id}`
 
 **Behavior:**
-- Returns `approved: true` if investor has verified KYC documents
+- Retrieves all documents for the investor
+- Checks if any document has `status: "verified"`
+- Returns `approved: true` if investor has at least one verified KYC document
 - Sets `kyc_level: "full"` on approval, `"pending"` otherwise
 - Auto-approves if DocumentVault service is unavailable
 
@@ -67,16 +71,43 @@ If `DOCUMENT_VAULT_SERVICE_URL` is not set or is empty:
 **API Call:**
 - Triggers document verification process in DocumentVault
 - Endpoint: `POST /api/v1/documents/verify`
-- Request Body: `{"document_id": "uuid"}`
+- Request Body: `{"document_id": "uuid", "verifier_id": "uuid"}`
+
+**Request Parameters:**
+- `document_id`: UUID of the document to verify
+- `verifier_id`: UUID of the entity performing verification
+  - For Property Onboarding: Property owner ID
+  - For Investor Onboarding: Agent ID
 
 **Response:**
 ```json
 {
-  "document_id": "uuid",
-  "status": "verified" | "mismatch" | "verification_failed",
-  "verified_at": "2025-11-12T00:00:00Z"
+  "id": "uuid",
+  "entity_type": "issuer",
+  "entity_id": "uuid",
+  "token_id": null,
+  "document_type": "offering_memorandum",
+  "filename": "document.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 2048576,
+  "status": "verified",
+  "sha256_hash": "hash-string",
+  "hash_verified_at": "2025-11-13T10:30:00Z",
+  "on_chain_reference": "0x123abc...",
+  "uploaded_by": "uuid",
+  "verified_by": "uuid",
+  "archived_by": null,
+  "archived_at": null,
+  "metadata": {},
+  "created_at": "2025-11-13T10:00:00Z",
+  "updated_at": "2025-11-13T10:30:00Z"
 }
 ```
+
+**Status Values:**
+- `"uploaded"`: Document uploaded but not yet verified
+- `"verified"`: Document successfully verified (hash matches)
+- `"mismatch"`: Hash verification failed (document tampered)
 
 **Behavior:**
 - Returns `passed: true` if document status is "verified"
@@ -91,20 +122,25 @@ Located in `app/services/document_vault_client.py`
 
 #### Methods
 
-##### `verify_document(document_id: str) -> Dict[str, Any]`
+##### `verify_document(document_id: str, verifier_id: str) -> Dict[str, Any]`
 
 Verifies a document via DocumentVault service.
 
 **Parameters:**
 - `document_id` (str): Document UUID to verify
+- `verifier_id` (str): UUID of entity performing verification (agent, owner, etc.)
 
 **Returns:**
-- Dictionary with verification results:
+- Dictionary with full document object including:
   ```python
   {
-      "document_id": "uuid",
-      "status": "verified",
-      "verified_at": "timestamp"
+      "id": "uuid",
+      "entity_id": "uuid",
+      "status": "verified" | "uploaded" | "mismatch",
+      "sha256_hash": "hash-string",
+      "hash_verified_at": "timestamp",
+      "verified_by": "verifier-uuid",
+      ...
   }
   ```
 
@@ -116,34 +152,44 @@ Verifies a document via DocumentVault service.
 from app.services.document_vault_client import get_document_vault_client
 
 client = get_document_vault_client()
-result = await client.verify_document("document-uuid")
-print(result["status"])  # "verified"
+result = await client.verify_document(
+    document_id="document-uuid",
+    verifier_id="agent-uuid"
+)
+print(result["status"])  # "verified" or "mismatch"
 ```
 
-##### `get_documents_by_entity(entity_id: str, status: Optional[str]) -> Dict[str, Any]`
+##### `get_documents_by_entity(entity_id: str) -> Dict[str, Any]`
 
 Gets all documents for an entity.
 
 **Parameters:**
-- `entity_id` (str): Entity UUID
-- `status` (str, optional): Filter by status (e.g., "verified", "uploaded")
+- `entity_id` (str): Entity UUID (property, investor, issuer, etc.)
 
 **Returns:**
 - Dictionary with document list:
   ```python
   {
-      "documents": [...],
-      "count": 5
+      "documents": [
+          {
+              "id": "uuid",
+              "entity_id": "uuid",
+              "document_type": "offering_memorandum",
+              "status": "verified",  # or "uploaded", "mismatch"
+              "sha256_hash": "hash",
+              "verified_by": "uuid",
+              ...
+          }
+      ]
   }
   ```
 
 **Example:**
 ```python
-result = await client.get_documents_by_entity(
-    entity_id="property-uuid",
-    status="verified"
-)
-print(f"Found {result['count']} verified documents")
+result = await client.get_documents_by_entity(entity_id="property-uuid")
+documents = result["documents"]
+verified_docs = [d for d in documents if d["status"] == "verified"]
+print(f"Found {len(verified_docs)} verified documents")
 ```
 
 ##### `check_documents_status(entity_id: str, required_status: str) -> bool`
@@ -375,40 +421,124 @@ POST /api/v1/documents/verify
 Content-Type: application/json
 
 {
-  "document_id": "uuid"
+  "document_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+  "verifier_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 }
 ```
 
-**Response:**
+**Response (Success):**
 ```json
 {
-  "document_id": "uuid",
+  "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+  "entity_type": "issuer",
+  "entity_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+  "token_id": null,
+  "document_type": "offering_memorandum",
+  "filename": "Project Alpha Offering.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 2048576,
   "status": "verified",
-  "hash": "sha256-hash",
-  "verified_at": "2025-11-12T00:00:00Z"
+  "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "hash_verified_at": "2025-11-13T10:30:00Z",
+  "on_chain_reference": "0x123abc...",
+  "uploaded_by": "c1d2e3f4-a5b6-7890-1234-567890fedcba",
+  "verified_by": "d2e3f4a5-b6c7-8901-2345-678901abcdef",
+  "archived_by": null,
+  "archived_at": null,
+  "metadata": {
+    "deal_name": "Project Alpha"
+  },
+  "created_at": "2025-11-13T10:00:00Z",
+  "updated_at": "2025-11-13T10:30:00Z"
+}
+```
+
+**Response (Failure - Hash Mismatch):**
+```json
+{
+  "id": "b2c3d4e5-f6a7-8901-2345-678901fedcba",
+  "entity_type": "issuer",
+  "entity_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+  "token_id": null,
+  "document_type": "subscription",
+  "filename": "investor_subscription_agreement.pdf",
+  "mime_type": "application/pdf",
+  "size_bytes": 512288,
+  "status": "mismatch",
+  "sha256_hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+  "hash_verified_at": "2025-11-13T11:05:00Z",
+  "on_chain_reference": null,
+  "uploaded_by": "e3f4a5b6-c7d8-9012-3456-789012abcdef",
+  "verified_by": "f4a5b6c7-d8e9-0123-4567-890123abcdef",
+  "archived_by": null,
+  "archived_at": null,
+  "metadata": null,
+  "created_at": "2025-11-13T11:00:00Z",
+  "updated_at": "2025-11-13T11:05:00Z"
 }
 ```
 
 #### List Documents
 ```http
-GET /api/v1/documents?entity_id={uuid}&status=verified
+GET /api/v1/documents/{entity_id}
 ```
 
-**Response:**
+**Response (Empty):**
+```json
+{
+  "documents": []
+}
+```
+
+**Response (With Documents):**
 ```json
 {
   "documents": [
     {
-      "id": "uuid",
-      "entity_id": "uuid",
-      "document_type": "property_deed",
+      "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      "entity_type": "issuer",
+      "entity_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+      "token_id": null,
+      "document_type": "offering_memorandum",
+      "filename": "Project Alpha Offering.pdf",
+      "mime_type": "application/pdf",
+      "size_bytes": 2048576,
       "status": "verified",
-      "created_at": "2025-11-12T00:00:00Z"
+      "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "hash_verified_at": "2025-11-13T10:30:00Z",
+      "on_chain_reference": "0x123abc...",
+      "uploaded_by": "c1d2e3f4-a5b6-7890-1234-567890fedcba",
+      "verified_by": "d2e3f4a5-b6c7-8901-2345-678901abcdef",
+      "archived_by": null,
+      "archived_at": null,
+      "metadata": {
+        "deal_name": "Project Alpha"
+      },
+      "created_at": "2025-11-13T10:00:00Z",
+      "updated_at": "2025-11-13T10:30:00Z"
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-2345-678901fedcba",
+      "entity_type": "issuer",
+      "entity_id": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
+      "token_id": null,
+      "document_type": "subscription",
+      "filename": "investor_subscription_agreement.pdf",
+      "mime_type": "application/pdf",
+      "size_bytes": 512288,
+      "status": "uploaded",
+      "sha256_hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+      "hash_verified_at": null,
+      "on_chain_reference": null,
+      "uploaded_by": "e3f4a5b6-c7d8-9012-3456-789012abcdef",
+      "verified_by": null,
+      "archived_by": null,
+      "archived_at": null,
+      "metadata": null,
+      "created_at": "2025-11-13T11:00:00Z",
+      "updated_at": "2025-11-13T11:00:00Z"
     }
-  ],
-  "count": 1,
-  "offset": 0,
-  "limit": 100
+  ]
 }
 ```
 

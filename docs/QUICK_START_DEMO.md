@@ -40,30 +40,32 @@ make worker
 
 ---
 
-## 📝 Implementation Checklist
+## 📝 Implementation Status
 
-### ✅ Phase 1: Setup (Will be developed)
-- [ ] Create new permissions (property:*, token:*, user:*)
-- [ ] Create 4 roles (Agent, PropertyOwner, InvestorPending, InvestorActive)
-- [ ] Create seed data script
-- [ ] Add mocked service classes
+### ✅ Phase 1: Setup (COMPLETED)
+- [x] Create new permissions (property:*, token:*, user:*)
+- [x] Create 4 roles (Agent, PropertyOwner, InvestorPending, InvestorActive)
+- [x] Create seed data script (`/api/v1/setup/initialize-demo`)
+- [x] Add mocked service classes (BlockchainService, PaymentService, TokenRegistryService)
 
-### ✅ Phase 2: Workflows (Will be developed)
-- [ ] PropertyOnboardingWorkflow
-- [ ] InvestorOnboardingWorkflow
-- [ ] TokenPurchaseWorkflow
-- [ ] DocumentVerificationWorkflow
+### ✅ Phase 2: Workflows (COMPLETED)
+- [x] PropertyOnboardingWorkflow - Complete with document verification, smart contract, minting
+- [x] InvestorOnboardingWorkflow - Complete with KYC verification, wallet creation
+- [x] TokenPurchaseWorkflow - Complete with payment, blockchain transfer, registry update
+- [x] DocumentVerificationWorkflow - Complete with automated and manual approval
 
-### ✅ Phase 3: API Endpoints (Will be developed)
-- [ ] Property management endpoints
-- [ ] Token operations endpoints
-- [ ] User onboarding endpoints
-- [ ] Workflow trigger endpoints
+### ✅ Phase 3: API Endpoints (COMPLETED)
+- [x] Property management endpoints (`/api/v1/properties`)
+- [x] Token operations endpoints (`/api/v1/tokens`)
+- [x] User onboarding endpoints (`/api/v1/onboarding`)
+- [x] Workflow trigger endpoints (integrated into onboarding/property APIs)
+- [x] Setup endpoints (`/api/v1/setup`)
 
-### ✅ Phase 4: Mocked Services
-- [ ] BlockchainService (mock)
-- [ ] TokenRegistryService (mock)
-- [ ] PaymentProcessingService (mock)
+### ✅ Phase 4: Mocked Services (COMPLETED)
+- [x] BlockchainService (mock) - Smart contracts, token minting, transfers
+- [x] TokenRegistryService (mock) - Balance tracking in entity attributes
+- [x] PaymentProcessingService (mock) - Always successful payments
+- [x] DocumentVaultClient - HTTP client with graceful degradation
 
 ---
 
@@ -89,24 +91,41 @@ curl -X POST http://localhost:8000/api/v1/setup/initialize-demo \
 
 ### Scenario 1: Property Owner Onboarding
 
-**Step 1.1: Agent creates property owner**
+**Step 1.1: Onboard property owner (simplified endpoint)**
 ```bash
+curl -X POST http://localhost:8000/api/v1/onboarding/property-owner \
+  -H "Content-Type: application/json" \
+  -H "X-Actor-Id: <AGENT_ID>" \
+  -d '{
+    "name": "ABC Properties LLC",
+    "company_name": "ABC Properties LLC",
+    "contact_email": "owner@abc.com",
+    "phone": "+1234567890",
+    "address": "123 Business Ave"
+  }'
+
+# Response includes entity_id and role_id - save the entity_id as OWNER_ID
+```
+
+**Alternative: Manual entity + role assignment**
+```bash
+# Step 1: Create issuer entity
 curl -X POST http://localhost:8000/api/v1/entities \
   -H "Content-Type: application/json" \
   -H "X-Actor-Id: <AGENT_ID>" \
   -d '{
     "name": "ABC Properties LLC",
     "type": "issuer",
+    "status": "active",
     "attributes": {
       "company_name": "ABC Properties LLC",
       "contact_email": "owner@abc.com"
     }
   }'
-```
 
-**Step 1.2: Assign PropertyOwner role**
-```bash
+# Step 2: Assign PropertyOwner role
 curl -X POST http://localhost:8000/api/v1/assignments \
+  -H "Content-Type: application/json" \
   -d '{
     "principal_id": "<OWNER_ID>",
     "principal_type": "user",
@@ -119,37 +138,47 @@ curl -X POST http://localhost:8000/api/v1/assignments \
 
 **Step 2.1: Create property**
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities \
+curl -X POST http://localhost:8000/api/v1/properties \
+  -H "Content-Type: application/json" \
   -H "X-Actor-Id: <OWNER_ID>" \
   -d '{
     "name": "Sunset Apartments",
-    "type": "offering",
-    "parent_id": "<OWNER_ID>",
-    "attributes": {
-      "property_type": "residential",
-      "address": "123 Sunset Blvd, LA, CA",
-      "valuation": 5000000,
-      "total_tokens": 50000,
-      "token_price": 100
-    }
+    "owner_id": "<OWNER_ID>",
+    "property_type": "residential",
+    "address": "123 Sunset Blvd, LA, CA 90028",
+    "valuation": 5000000,
+    "total_tokens": 50000,
+    "token_price": 100,
+    "minimum_investment": 1000,
+    "description": "Luxury apartment complex in prime location"
   }'
+
+# Response includes property_id - save as PROPERTY_ID
 ```
 
-**Step 2.2: Upload property documents**
+**Step 2.2: Upload property documents (Optional - DocumentVault)**
 ```bash
-# Upload to DocumentVault
+# Upload documents to DocumentVault service
 # - Operating agreement
 # - Title deed
 # - Appraisal report
+# If DocumentVault is not configured, documents auto-approve for demo
 ```
 
-**Step 2.3: Trigger property onboarding workflow**
+**Step 2.3: Tokenize property (triggers workflow)**
 ```bash
-curl -X POST http://localhost:8000/api/v1/workflows/property-onboarding \
+curl -X POST http://localhost:8000/api/v1/properties/tokenize \
+  -H "Content-Type: application/json" \
   -d '{
     "property_id": "<PROPERTY_ID>",
     "owner_id": "<OWNER_ID>"
   }'
+
+# This starts PropertyOnboardingWorkflow which:
+# 1. Verifies documents
+# 2. Creates smart contract (mocked)
+# 3. Mints tokens (mocked)
+# 4. Activates property
 ```
 
 **What happens in the workflow:**
@@ -161,43 +190,39 @@ curl -X POST http://localhost:8000/api/v1/workflows/property-onboarding \
 
 ### Scenario 3: Investor Onboarding
 
-**Step 3.1: Agent creates investor**
+**Step 3.1: Onboard investor (simplified endpoint)**
 ```bash
-curl -X POST http://localhost:8000/api/v1/entities \
+curl -X POST http://localhost:8000/api/v1/onboarding/investor \
+  -H "Content-Type: application/json" \
   -H "X-Actor-Id: <AGENT_ID>" \
   -d '{
     "name": "John Doe",
-    "type": "investor",
-    "attributes": {
-      "email": "john@investor.com",
-      "investor_type": "individual"
-    }
+    "email": "john@investor.com",
+    "phone": "+1234567890",
+    "investor_type": "individual"
   }'
+
+# Response includes entity_id with InvestorPending role - save as INVESTOR_ID
 ```
 
-**Step 3.2: Assign InvestorPending role**
+**Step 3.2: Upload KYC documents (Optional - DocumentVault)**
 ```bash
-curl -X POST http://localhost:8000/api/v1/assignments \
-  -d '{
-    "principal_id": "<INVESTOR_ID>",
-    "role_id": "<INVESTOR_PENDING_ROLE_ID>"
-  }'
-```
-
-**Step 3.3: Upload KYC documents**
-```bash
-# Upload to DocumentVault
+# Upload to DocumentVault service
 # - ID proof
 # - Address proof
 # - Income verification
+# If DocumentVault is not configured, KYC auto-approves for demo
 ```
 
-**Step 3.4: Trigger investor onboarding workflow**
+**Step 3.3: Activate investor (triggers workflow)**
 ```bash
-curl -X POST http://localhost:8000/api/v1/workflows/investor-onboarding \
-  -d '{
-    "investor_id": "<INVESTOR_ID>"
-  }'
+curl -X POST http://localhost:8000/api/v1/onboarding/investor/<INVESTOR_ID>/activate \
+  -H "X-Actor-Id: <AGENT_ID>"
+
+# This starts InvestorOnboardingWorkflow which:
+# 1. Verifies KYC documents
+# 2. Creates blockchain wallet (mocked)
+# 3. Upgrades role from InvestorPending → InvestorActive
 ```
 
 **What happens in the workflow:**
@@ -221,13 +246,22 @@ curl -X GET "http://localhost:8000/api/v1/tokens/<PROPERTY_ID>"
 **Step 4.3: Purchase tokens**
 ```bash
 curl -X POST http://localhost:8000/api/v1/tokens/purchase \
+  -H "Content-Type: application/json" \
   -H "X-Actor-Id: <INVESTOR_ID>" \
   -d '{
     "investor_id": "<INVESTOR_ID>",
     "property_id": "<PROPERTY_ID>",
     "token_quantity": 10,
-    "payment_amount": 1000
+    "payment_method": "card"
   }'
+
+# This starts TokenPurchaseWorkflow which:
+# 1. Validates purchase eligibility
+# 2. Processes payment (mocked - always succeeds)
+# 3. Transfers tokens (mocked blockchain call)
+# 4. Records blockchain transaction (mocked)
+# 5. Updates token registry
+# 6. Publishes "token.purchased" event
 ```
 
 **What happens in the workflow:**
@@ -240,7 +274,7 @@ curl -X POST http://localhost:8000/api/v1/tokens/purchase \
 
 **Step 4.4: View holdings**
 ```bash
-curl -X GET "http://localhost:8000/api/v1/tokens/holdings?investor_id=<INVESTOR_ID>"
+curl -X GET "http://localhost:8000/api/v1/tokens/holdings/<INVESTOR_ID>"
 ```
 
 ---
@@ -249,21 +283,40 @@ curl -X GET "http://localhost:8000/api/v1/tokens/holdings?investor_id=<INVESTOR_
 
 ### Check Workflow Status
 ```bash
-# Using Temporal CLI
-temporal workflow describe --workflow-id <WORKFLOW_ID>
+# Using Temporal CLI (if Temporal is configured)
+temporal workflow describe --workflow-id <WORKFLOW_ID> \
+  --namespace <NAMESPACE> \
+  --address <TEMPORAL_HOST>
 
-# Or via API
-curl -X GET "http://localhost:8000/api/v1/workflows/<WORKFLOW_ID>/status"
+# Workflow IDs follow pattern: {WorkflowName}-{event_id}
+# Examples:
+# - property-onboarding-<property_id>
+# - investor-onboarding-<investor_id>
+# - token-purchase-<investor_id>-<property_id>
 ```
 
 ### View Events
 ```bash
+# List recent events
+curl -X GET "http://localhost:8000/api/v1/events"
+
+# Filter by event type
 curl -X GET "http://localhost:8000/api/v1/events?event_type=property.activated"
+
+# Get specific event
+curl -X GET "http://localhost:8000/api/v1/events/<EVENT_ID>"
 ```
 
 ### Check Audit Logs
 ```bash
-curl -X GET "http://localhost:8000/api/v1/audit/logs?entity_id=<ENTITY_ID>"
+# Audit logs are stored in database and structured logs
+# Query via database or CloudWatch Logs
+# Event types include:
+# - entity.create, entity.update, entity.archive
+# - role.create, role.update
+# - role_assignment.create, role_assignment.delete
+# - authorization.evaluate
+# - property.create, property.update
 ```
 
 ---
@@ -391,9 +444,19 @@ Check these files for detailed specifications:
 
 ---
 
-**Estimated Timeline:**
-- Backend Development: 5-7 days
-- Testing & Refinement: 2-3 days
-- **Total: ~2 weeks for demo-ready backend**
+## ✅ Implementation Complete
+
+All backend features are **fully implemented and tested**:
+- ✅ Complete RBAC system with 4 roles and 13 permissions
+- ✅ All 4 Temporal workflows operational
+- ✅ Property, token, and onboarding API endpoints
+- ✅ Mocked blockchain, payment, and token registry services
+- ✅ DocumentVault integration with graceful degradation
+- ✅ Hash-chained audit logging
+- ✅ Event publishing to SNS
+- ✅ Redis caching for authorization
+
+**Status:** Production-ready for MVP demo
+**Next Phase:** Frontend dashboard development
 
 

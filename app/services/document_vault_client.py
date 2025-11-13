@@ -39,7 +39,7 @@ class DocumentVaultClient:
         if not self._base_url:
             logger.warning("DocumentVault service URL not configured - operations will be mocked")
     
-    async def verify_document(self, document_id: str) -> Dict[str, Any]:
+    async def verify_document(self, document_id: str, verifier_id: str) -> Dict[str, Any]:
         """
         Verify a document via DocumentVault service.
         
@@ -51,9 +51,10 @@ class DocumentVaultClient:
         
         Args:
             document_id: Document identifier
+            verifier_id: ID of the entity performing verification (agent, owner, etc.)
         
         Returns:
-            Verification result
+            Verification result with full document object
         
         Raises:
             DocumentVaultError: If verification fails
@@ -62,11 +63,16 @@ class DocumentVaultClient:
             # Mock response when not configured
             logger.info(
                 "document_vault_verify_mock",
-                extra={"document_id": document_id, "reason": "service_url_not_configured"},
+                extra={
+                    "document_id": document_id,
+                    "verifier_id": verifier_id,
+                    "reason": "service_url_not_configured",
+                },
             )
             return {
-                "document_id": document_id,
+                "id": document_id,
                 "status": "verified",
+                "verified_by": verifier_id,
                 "mocked": True,
             }
         
@@ -76,7 +82,10 @@ class DocumentVaultClient:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
                     url,
-                    json={"document_id": document_id},
+                    json={
+                        "document_id": document_id,
+                        "verifier_id": verifier_id,
+                    },
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -85,6 +94,7 @@ class DocumentVaultClient:
                     "document_vault_verify_success",
                     extra={
                         "document_id": document_id,
+                        "verifier_id": verifier_id,
                         "status": result.get("status"),
                     },
                 )
@@ -96,6 +106,7 @@ class DocumentVaultClient:
                 "document_vault_verify_http_error",
                 extra={
                     "document_id": document_id,
+                    "verifier_id": verifier_id,
                     "status_code": exc.response.status_code,
                     "detail": exc.response.text,
                 },
@@ -109,6 +120,7 @@ class DocumentVaultClient:
                 "document_vault_verify_request_error",
                 extra={
                     "document_id": document_id,
+                    "verifier_id": verifier_id,
                     "error": str(exc),
                 },
             )
@@ -119,19 +131,18 @@ class DocumentVaultClient:
     async def get_documents_by_entity(
         self,
         entity_id: str,
-        status: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get documents for an entity.
         
-        Calls GET /api/v1/documents?entity_id={entity_id}&status={status}
+        Calls GET /api/v1/documents/{entity_id}
         
         Args:
-            entity_id: Entity identifier
-            status: Optional status filter (uploaded, verified, etc.)
+            entity_id: Entity identifier (property, investor, issuer, etc.)
         
         Returns:
-            Document list response
+            Document list response: {"documents": [...]}
+            Documents can have status: "uploaded", "verified", "mismatch", etc.
         
         Raises:
             DocumentVaultError: If request fails
@@ -144,18 +155,14 @@ class DocumentVaultClient:
             )
             return {
                 "documents": [],
-                "count": 0,
                 "mocked": True,
             }
         
-        url = f"{self._base_url}/api/v1/documents"
-        params = {"entity_id": entity_id}
-        if status:
-            params["status"] = status
+        url = f"{self._base_url}/api/v1/documents/{entity_id}"
         
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(url, params=params)
+                response = await client.get(url)
                 response.raise_for_status()
                 result = response.json()
                 
@@ -204,31 +211,35 @@ class DocumentVaultClient:
         
         Args:
             entity_id: Entity identifier
-            required_status: Required document status
+            required_status: Required document status (e.g., "verified")
         
         Returns:
-            True if entity has documents with required status
+            True if entity has at least one document with required status
         """
         try:
-            result = await self.get_documents_by_entity(
-                entity_id=entity_id,
-                status=required_status,
-            )
+            result = await self.get_documents_by_entity(entity_id=entity_id)
             
             documents = result.get("documents", [])
-            has_documents = len(documents) > 0
+            
+            # Check if any document has the required status
+            verified_documents = [
+                doc for doc in documents 
+                if doc.get("status") == required_status
+            ]
+            has_verified_documents = len(verified_documents) > 0
             
             logger.info(
                 "document_vault_status_check",
                 extra={
                     "entity_id": entity_id,
                     "required_status": required_status,
-                    "has_documents": has_documents,
-                    "count": len(documents),
+                    "total_documents": len(documents),
+                    "verified_documents": len(verified_documents),
+                    "has_verified_documents": has_verified_documents,
                 },
             )
             
-            return has_documents
+            return has_verified_documents
         
         except DocumentVaultError:
             # If service unavailable, assume documents are OK for demo
