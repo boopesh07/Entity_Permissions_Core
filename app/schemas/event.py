@@ -41,7 +41,7 @@ class EventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    event_id: str
+    event_id: UUID
     event_type: str
     source: str
     occurred_at: datetime
@@ -54,3 +54,12 @@ class EventResponse(BaseModel):
     last_error: Optional[str]
     created_at: datetime
     updated_at: datetime
+    
+    @field_validator("event_id", mode="before")
+    @classmethod
+    def _parse_event_id(cls, value: str | UUID) -> UUID:
+        """Convert string event_id from database to UUID."""
+        if isinstance(value, str):
+            from uuid import UUID as _UUID
+            return _UUID(value)
+        return value

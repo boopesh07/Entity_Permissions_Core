@@ -73,7 +73,8 @@ class PaymentProcessingService:
             },
         )
         
-        transaction_id = f"txn_{uuid.uuid4().hex[:16]}"
+        # Generate proper UUID for transaction ID
+        transaction_id = str(uuid.uuid4())
         
         result = {
             "success": True,
@@ -171,7 +172,8 @@ class PaymentProcessingService:
             },
         )
         
-        refund_id = f"rfnd_{uuid.uuid4().hex[:16]}"
+        # Generate proper UUID for refund ID
+        refund_id = str(uuid.uuid4())
         
         result = {
             "success": True,
