@@ -101,3 +101,4 @@ class InvestorOnboardingWorkflow:
         """Signal that KYC documents have been uploaded."""
         self.kyc_documents_uploaded = True
 
+

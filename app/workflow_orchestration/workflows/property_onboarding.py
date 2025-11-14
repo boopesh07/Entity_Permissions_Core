@@ -18,8 +18,8 @@ class PropertyOnboardingWorkflow:
     Orchestrates property onboarding from document upload to token activation.
     
     Flow:
-    1. Wait for property documents to be uploaded
-    2. Verify property documents
+    1. Check if property documents are verified
+    2. If not verified, wait for document.verified signal (with timeout)
     3. Create smart contract on blockchain
     4. Mint tokens for the property
     5. Activate property (make available to investors)
@@ -27,7 +27,8 @@ class PropertyOnboardingWorkflow:
     """
     
     def __init__(self) -> None:
-        self.documents_uploaded = False
+        self.documents_verified = False
+        self.verification_result: Dict[str, Any] = {}
     
     @workflow.run
     async def run(self, property_id: str, owner_id: str) -> str:
@@ -41,19 +42,57 @@ class PropertyOnboardingWorkflow:
         Returns:
             Workflow completion status
         """
-        # Step 1: Verify property documents
-        verification_result = await workflow.execute_activity(
+        # Step 1: Check if property documents are already verified
+        initial_check = await workflow.execute_activity(
             tokenization_activities.verify_property_documents_activity,
             {"property_id": property_id},
-            start_to_close_timeout=timedelta(hours=24),
+            start_to_close_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(
                 maximum_attempts=3,
                 initial_interval=timedelta(seconds=10),
             ),
         )
         
-        if not verification_result["approved"]:
-            return "property.verification_failed"
+        if not initial_check["approved"]:
+            # Documents not verified yet - wait for signal
+            workflow.logger.info(
+                f"Property {property_id} documents not verified. Waiting for document.verified signal..."
+            )
+            
+            # Wait up to 7 days for documents to be verified
+            await workflow.wait_condition(
+                lambda: self.documents_verified,
+                timeout=timedelta(days=7),
+            )
+            
+            if not self.documents_verified:
+                # Timeout - documents were not verified in time
+                workflow.logger.error(f"Property {property_id} document verification timed out after 7 days")
+                return "property.verification_timeout"
+            
+            # Documents verified via signal
+            # If signal has incomplete property_details, fetch from database
+            signal_data = self.verification_result
+            
+            if not signal_data.get("property_details") or not signal_data["property_details"].get("total_tokens"):
+                workflow.logger.info(
+                    f"Signal data incomplete, fetching property details from database for {property_id}"
+                )
+                # Re-fetch property details from database
+                property_check = await workflow.execute_activity(
+                    tokenization_activities.verify_property_documents_activity,
+                    {"property_id": property_id},
+                    start_to_close_timeout=timedelta(minutes=5),
+                )
+                verification_result = {
+                    "approved": True,
+                    "property_details": property_check["property_details"],
+                }
+            else:
+                verification_result = signal_data
+        else:
+            # Documents already verified - proceed immediately
+            verification_result = initial_check
         
         # Step 2: Create smart contract
         contract_result = await workflow.execute_activity(
@@ -104,7 +143,14 @@ class PropertyOnboardingWorkflow:
         return "property.activated"
     
     @workflow.signal
-    async def documents_uploaded_signal(self) -> None:
-        """Signal that property documents have been uploaded."""
-        self.documents_uploaded = True
+    async def document_verified_signal(self, verification_data: Dict[str, Any]) -> None:
+        """
+        Signal that property documents have been verified.
+        
+        Args:
+            verification_data: Contains property_details and approval status
+        """
+        workflow.logger.info(f"Received document_verified_signal with data: {verification_data}")
+        self.documents_verified = True
+        self.verification_result = verification_data
 

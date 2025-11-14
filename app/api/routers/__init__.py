@@ -13,6 +13,7 @@ from app.api.routers import (
     roles,
     setup,
     tokens,
+    workflows,
 )
 
 
@@ -28,4 +29,5 @@ def get_api_router() -> APIRouter:
     router.include_router(tokens.router, prefix="/api/v1/tokens", tags=["tokens"])
     router.include_router(onboarding.router, prefix="/api/v1/onboarding", tags=["onboarding"])
     router.include_router(setup.router, prefix="/api/v1/setup", tags=["setup"])
+    router.include_router(workflows.router, prefix="/api/v1/workflows", tags=["workflows"])
     return router

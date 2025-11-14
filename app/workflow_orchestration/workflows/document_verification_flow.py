@@ -32,6 +32,7 @@ class DocumentVerificationWorkflow:
         self,
         document_id: str,
         entity_id: str,
+        entity_type: str,
         document_type: str,
         verifier_id: str = None,
     ) -> str:
@@ -41,6 +42,7 @@ class DocumentVerificationWorkflow:
         Args:
             document_id: Document identifier
             entity_id: Associated entity ID
+            entity_type: Type of entity (issuer, investor, property, offering) - REQUIRED
             document_type: Type of document
             verifier_id: ID of entity performing verification (agent, owner, etc.)
         
@@ -86,16 +88,31 @@ class DocumentVerificationWorkflow:
             start_to_close_timeout=timedelta(minutes=2),
         )
         
-        # Step 4: Trigger dependent workflows
-        if entity_id:
-            await workflow.execute_activity(
-                tokenization_activities.trigger_entity_workflow_activity,
-                {
+        # Step 4: Get property/entity details for the event payload
+        # This will fetch the property_details from the database
+        entity_details = await workflow.execute_activity(
+            tokenization_activities.verify_property_documents_activity,
+            {"property_id": entity_id},
+            start_to_close_timeout=timedelta(minutes=5),
+        )
+        
+        # Step 5: Publish document.verified event
+        # This will trigger signals to waiting workflows (property-onboarding, investor-onboarding)
+        await workflow.execute_activity(
+            tokenization_activities.publish_platform_event_activity,
+            {
+                "event_type": "document.verified",
+                "payload": {
                     "entity_id": entity_id,
-                    "event": "documents_verified",
+                    "entity_type": entity_type,
+                    "document_id": document_id,
+                    "document_type": document_type,
+                    "verification_status": "verified",
+                    "property_details": entity_details.get("property_details", {}),
                 },
-                start_to_close_timeout=timedelta(minutes=1),
-            )
+            },
+            start_to_close_timeout=timedelta(minutes=2),
+        )
         
         return "verification.completed"
     

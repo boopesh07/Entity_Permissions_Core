@@ -89,6 +89,122 @@ class EventService:
                 "event_workflow_dispatch_failed",
                 extra={"event_id": record.event_id, "event_type": record.event_type},
             )
+        
+        # Send signal to waiting workflows for document.verified events
+        if record.event_type == "document.verified":
+            try:
+                import asyncio
+                from app.workflow_orchestration.signal_sender import get_signal_sender
+                
+                entity_id = record.payload.get("entity_id")
+                entity_type = record.payload.get("entity_type")
+                
+                if entity_id and entity_type:
+                    signal_sender = get_signal_sender()
+                    
+                    verification_data = {
+                        "approved": True,
+                        "property_details": record.payload.get("property_details", {}),
+                        "documents": record.payload.get("documents", []),
+                    }
+                    
+                    # Run async signal sending synchronously
+                    loop = None
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    # Execute signal sending and wait for completion
+                    success = loop.run_until_complete(
+                        signal_sender.send_document_verified_signal(
+                            entity_id=entity_id,
+                            entity_type=entity_type,
+                            verification_data=verification_data,
+                        )
+                    )
+                    
+                    if success:
+                        self._logger.info(
+                            "document_verified_signal_sent_success",
+                            extra={
+                                "entity_id": entity_id,
+                                "entity_type": entity_type,
+                                "event_id": record.event_id,
+                            },
+                        )
+                    else:
+                        self._logger.warning(
+                            "document_verified_signal_send_failed",
+                            extra={
+                                "entity_id": entity_id,
+                                "entity_type": entity_type,
+                                "event_id": record.event_id,
+                            },
+                        )
+            except Exception:  # noqa: BLE001
+                self._logger.exception(
+                    "document_verified_signal_dispatch_failed",
+                    extra={"event_id": record.event_id},
+                )
+        
+        # Handle property.activated events to update entity status
+        if record.event_type == "property.activated":
+            try:
+                from app.services.entities import EntityService
+                from app.services.audit import AuditService
+                from uuid import UUID
+                
+                property_id = record.payload.get("property_id")
+                
+                if property_id:
+                    # Update property status to tokenized
+                    entity_service = EntityService(self._session)
+                    entity = entity_service.get_entity(UUID(property_id))
+                    
+                    if entity:
+                        # Update attributes
+                        entity.attributes["property_status"] = "tokenized"
+                        entity.attributes["tokenized_at"] = record.occurred_at.isoformat()
+                        entity.attributes["contract_address"] = record.payload.get("contract_address")
+                        entity.attributes["total_tokens"] = record.payload.get("total_tokens")
+                        
+                        self._session.add(entity)
+                        self._session.flush()
+                        
+                        # Create audit log
+                        audit_service = AuditService(self._session)
+                        audit_service.create_audit_log(
+                            action="property.tokenized",
+                            entity_id=UUID(property_id),
+                            entity_type="property",
+                            actor_id=record.payload.get("owner_id"),
+                            changes={
+                                "property_status": {"old": "pending", "new": "tokenized"},
+                                "contract_address": record.payload.get("contract_address"),
+                                "total_tokens": record.payload.get("total_tokens"),
+                            },
+                            metadata={
+                                "workflow_event_id": record.event_id,
+                                "tokenized_at": record.occurred_at.isoformat(),
+                            },
+                        )
+                        
+                        self._session.commit()
+                        
+                        self._logger.info(
+                            "property_status_updated_to_tokenized",
+                            extra={
+                                "property_id": property_id,
+                                "event_id": record.event_id,
+                            },
+                        )
+            except Exception:  # noqa: BLE001
+                self._logger.exception(
+                    "property_activated_handler_failed",
+                    extra={"event_id": record.event_id},
+                )
 
         return record
 

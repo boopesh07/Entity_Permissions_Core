@@ -228,3 +228,4 @@ def test_investor_pending_cannot_purchase(client: TestClient) -> None:
     assert purchase_data["status"] in ["failed", "skipped"]
 
 
+
