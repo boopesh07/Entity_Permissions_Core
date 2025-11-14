@@ -26,19 +26,36 @@ The Entity & Permissions Core provides canonical models for issuers, SPVs, offer
   - Copy `.env` or export the variables manually.  
   - Set `EPR_DATABASE_URL` to your target database (defaults to a local SQLite file).
   - Provide `EPR_REDIS_URL`/`EPR_REDIS_TOKEN` if you want to exercise the shared authorization cache locally (falls back to in-memory when omitted).
+  - Set `EPR_TEMPORAL_HOST`, `EPR_TEMPORAL_NAMESPACE`, and `EPR_TEMPORAL_API_KEY` to enable Temporal workflows.
 
 3. **Start the API**
    ```bash
-   EPR_DATABASE_URL="postgresql://..." .venv/bin/uvicorn app.main:app --reload --port 8000
+   # Using Make
+   make run
+   
+   # Or directly with uvicorn
+   .venv/bin/uvicorn app.main:app --reload --port 8000
    ```
 
-4. **Verify the service**
+4. **Start the Temporal Worker** (in a separate terminal)
+   ```bash
+   # Using Make (recommended)
+   make worker
+   
+   # Or directly with Python
+   .venv/bin/python -m app.workers.temporal_worker
+   ```
+
+5. **Verify the service**
    ```bash
    curl -sSf http://localhost:8000/healthz
    ```
 
-5. **Run the tests**
+6. **Run the tests**
    ```bash
+   make tests
+   
+   # Or directly with pytest
    .venv/bin/pytest -vv
    ```
 
@@ -91,6 +108,7 @@ The service is configured via the `AppSettings` class in `app/core/config.py`. K
 - `EPR_TEMPORAL_HOST`, `EPR_TEMPORAL_NAMESPACE`, `EPR_TEMPORAL_API_KEY` (required to enable Temporal workflows)
 - `EPR_TEMPORAL_TASK_QUEUE` (default: `omen-workflows`)
 - `EPR_TEMPORAL_TLS_ENABLED` (default: `true`)
+- `EPR_DOCUMENT_VAULT_SERVICE_URL` (DocumentVault microservice URL; optional, mocks responses if not configured)
 
 ## Event & Workflow Engine (EWE)
 
@@ -230,8 +248,53 @@ The orchestrator automatically reacts to:
 | `entity.archived` | `EntityCascadeArchiveWorkflow` – archives vault documents & invalidates permissions. |
 | `document.verified` | `DocumentVerifiedWorkflow` – simulates receipt issuance. |
 | `role.assignment.changed`, `role.updated` | `PermissionChangeWorkflow` – clears authorization caches. |
+| `property.onboarding` | `PropertyOnboardingWorkflow` – verifies property documents, creates smart contracts, mints tokens. |
+| `investor.onboarding` | `InvestorOnboardingWorkflow` – verifies KYC documents, creates investor wallets, upgrades permissions. |
+| `token.purchase` | `TokenPurchaseWorkflow` – validates purchase, processes payment, transfers tokens, updates blockchain. |
+| `document.uploaded` | `DocumentVerificationWorkflow` – triggers automated verification, dispatches follow-up workflows. |
 
 If Temporal is not configured, workflow dispatch is skipped but events are still persisted and published.
+
+### Real Estate Tokenization Workflows
+
+The service supports comprehensive real estate tokenization workflows:
+
+**Property Onboarding:**
+1. Verify property documents via DocumentVault
+2. Create smart contract on blockchain (mocked)
+3. Mint property tokens (mocked)
+4. Activate property for trading
+
+**Investor Onboarding:**
+1. Verify KYC documents via DocumentVault
+2. Create investor blockchain wallet (mocked)
+3. Upgrade investor permissions from `InvestorPending` to `InvestorActive`
+
+**Token Purchase:**
+1. Validate purchase eligibility and token availability
+2. Process payment (mocked)
+3. Transfer tokens on blockchain (mocked)
+4. Update token registry
+5. Publish platform events
+
+**Document Verification:**
+1. Automated hash verification via DocumentVault
+2. Status update (verified/mismatch)
+3. Trigger dependent workflows (property/investor onboarding)
+
+📖 See [docs/TOKENIZATION_IMPLEMENTATION_PLAN.md](docs/TOKENIZATION_IMPLEMENTATION_PLAN.md) for implementation details.
+
+### DocumentVault Integration
+
+The service integrates with the DocumentVault microservice for document operations:
+
+- **Document Verification**: Calls `POST /api/v1/documents/verify` to verify document integrity
+- **Document Status Checks**: Calls `GET /api/v1/documents?entity_id={id}&status=verified`
+- **Graceful Degradation**: Auto-approves when DocumentVault is unavailable (for demo purposes)
+
+Configure via `EPR_DOCUMENT_VAULT_SERVICE_URL` environment variable.
+
+📖 See [docs/DOCUMENT_VAULT_INTEGRATION.md](docs/DOCUMENT_VAULT_INTEGRATION.md) for integration guide.
 
 #### Module layout
 
@@ -278,10 +341,20 @@ If Temporal is not configured, workflow dispatch is skipped but events are still
 | `/api/v1/authorize` | POST | Stateless authorization check |
 | `/api/v1/events` | POST/GET | Ingest or list platform events |
 | `/api/v1/events/{event_id}` | GET | Fetch a specific event |
+| `/api/v1/properties` | POST/GET | Create or list tokenized properties |
+| `/api/v1/properties/{id}` | GET/PATCH | Retrieve or update a property |
+| `/api/v1/properties/{id}/activate` | POST | Activate property for trading |
+| `/api/v1/tokens` | GET | List available tokens |
+| `/api/v1/tokens/purchase` | POST | Purchase property tokens |
+| `/api/v1/onboarding/property-owner` | POST | Onboard property owner |
+| `/api/v1/onboarding/investor` | POST | Onboard investor |
+| `/api/v1/setup/initialize-demo` | POST | Initialize demo data (roles, permissions, sample entities) |
 
 Duplicate entity or role POSTs return `409 Conflict` with a descriptive message. Use the list endpoints to discover existing resources before creating new ones.
 
 All mutating endpoints accept an optional `X-Actor-Id` header to attribute audit log entries.
+
+📖 See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for comprehensive API documentation.
 
 ## Audit producers
 

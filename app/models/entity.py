@@ -42,11 +42,11 @@ class Entity(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(length=255), nullable=False)
     type: Mapped[EntityType] = mapped_column(
-        SqlEnum(EntityType, name="entity_type", native_enum=False),
+        SqlEnum(EntityType, name="entity_type", native_enum=True, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
     status: Mapped[EntityStatus] = mapped_column(
-        SqlEnum(EntityStatus, name="entity_status", native_enum=False),
+        SqlEnum(EntityStatus, name="entity_status", native_enum=True, values_callable=lambda x: [e.value for e in x]),
         default=EntityStatus.ACTIVE,
         nullable=False,
     )

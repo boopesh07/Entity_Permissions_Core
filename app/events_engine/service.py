@@ -89,6 +89,132 @@ class EventService:
                 "event_workflow_dispatch_failed",
                 extra={"event_id": record.event_id, "event_type": record.event_type},
             )
+        
+        # Send signal to waiting workflows for document.verified events
+        if record.event_type == "document.verified":
+            try:
+                import asyncio
+                from concurrent.futures import ThreadPoolExecutor
+                from app.workflow_orchestration.signal_sender import get_signal_sender
+                
+                entity_id = record.payload.get("entity_id")
+                entity_type = record.payload.get("entity_type")
+                
+                if entity_id and entity_type:
+                    signal_sender = get_signal_sender()
+                    
+                    verification_data = {
+                        "approved": True,
+                        "property_details": record.payload.get("property_details", {}),
+                        "documents": record.payload.get("documents", []),
+                    }
+                    
+                    # Send signal in a separate thread to avoid event loop conflicts
+                    # This is necessary because this code may be called from within
+                    # a Temporal activity which already has an event loop running
+                    def _send_signal():
+                        """Run signal sending in a new event loop."""
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(
+                                signal_sender.send_document_verified_signal(
+                                    entity_id=entity_id,
+                                    entity_type=entity_type,
+                                    verification_data=verification_data,
+                                )
+                            )
+                        finally:
+                            new_loop.close()
+                    
+                    # Execute in thread pool to avoid blocking
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(_send_signal)
+                        success = future.result(timeout=30)  # 30 second timeout
+                    
+                    if success:
+                        self._logger.info(
+                            "document_verified_signal_sent_success",
+                            extra={
+                                "entity_id": entity_id,
+                                "entity_type": entity_type,
+                                "event_id": record.event_id,
+                            },
+                        )
+                    else:
+                        self._logger.warning(
+                            "document_verified_signal_send_failed",
+                            extra={
+                                "entity_id": entity_id,
+                                "entity_type": entity_type,
+                                "event_id": record.event_id,
+                            },
+                        )
+            except Exception:  # noqa: BLE001
+                self._logger.exception(
+                    "document_verified_signal_dispatch_failed",
+                    extra={"event_id": record.event_id},
+                )
+        
+        # Handle property.activated events to update entity status
+        if record.event_type == "property.activated":
+            try:
+                from app.services.entities import EntityService
+                from app.services.audit import AuditService
+                from uuid import UUID
+                from sqlalchemy.orm.attributes import flag_modified
+                
+                property_id = record.payload.get("property_id")
+                
+                if property_id:
+                    # Update property status to tokenized
+                    entity_service = EntityService(self._session)
+                    entity = entity_service.get(UUID(property_id))
+                    
+                    if entity:
+                        # Update attributes
+                        entity.attributes["property_status"] = "active"
+                        entity.attributes["tokenized_at"] = record.occurred_at.isoformat()
+                        entity.attributes["smart_contract_address"] = record.payload.get("contract_address")
+                        entity.attributes["total_tokens"] = record.payload.get("total_tokens")
+                        
+                        # Mark attributes as modified so SQLAlchemy detects the change
+                        flag_modified(entity, "attributes")
+                        
+                        self._session.add(entity)
+                        self._session.flush()
+                        
+                        # Create audit log
+                        audit_service = AuditService(self._session)
+                        audit_service.record(
+                            action="property.tokenized",
+                            actor_id=UUID(record.payload.get("owner_id")) if record.payload.get("owner_id") else None,
+                            entity_id=UUID(property_id),
+                            entity_type=entity.type.value,
+                            details={
+                                "property_status": {"old": "pending", "new": "active"},
+                                "smart_contract_address": record.payload.get("contract_address"),
+                                "total_tokens": record.payload.get("total_tokens"),
+                                "workflow_event_id": record.event_id,
+                                "tokenized_at": record.occurred_at.isoformat(),
+                            },
+                        )
+                        
+                        self._session.commit()
+                        
+                        self._logger.info(
+                            "property_status_updated_to_tokenized",
+                            extra={
+                                "property_id": property_id,
+                                "event_id": record.event_id,
+                                "contract_address": record.payload.get("contract_address"),
+                            },
+                        )
+            except Exception:  # noqa: BLE001
+                self._logger.exception(
+                    "property_activated_handler_failed",
+                    extra={"event_id": record.event_id},
+                )
 
         return record
 

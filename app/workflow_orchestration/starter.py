@@ -27,9 +27,16 @@ class WorkflowStarter:
             raise RuntimeError("Temporal service is not configured")
 
         client = await get_temporal_client(self._config)
+        workflow_def = getattr(workflow_class, '__temporal_workflow_definition', None)
+        if workflow_def and hasattr(workflow_def, 'name'):
+            workflow_name = workflow_def.name
+        else:
+            workflow_name = workflow_class.__name__
+        
+        # Use start_workflow (not execute_workflow) to return immediately without waiting for result
         handle = await client.start_workflow(
-            workflow_class.run,
-            *args,
+            workflow_name,
+            args=list(args),
             id=workflow_id,
             task_queue=self._config.task_queue,
         )
