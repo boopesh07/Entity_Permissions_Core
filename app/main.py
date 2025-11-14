@@ -25,6 +25,13 @@ async def lifespan(app: FastAPI):  # noqa: D401
     """Application lifespan context for startup/shutdown hooks."""
 
     settings = get_settings()
+    
+    # Safety check: Never run database operations in test environment
+    # Tests should use in-memory databases and handle setup themselves
+    if settings.environment == "test":
+        yield
+        return
+    
     with session_scope() as session:
         RoleService(session).ensure_baseline_permissions(settings.default_permissions)
 

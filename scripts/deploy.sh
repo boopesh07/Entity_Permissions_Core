@@ -40,6 +40,14 @@ EPR_REDIS_CACHE_PREFIX="${EPR_REDIS_CACHE_PREFIX:-epr}"
 EPR_REDIS_CACHE_TTL="${EPR_REDIS_CACHE_TTL:-300}"
 EPR_DOCUMENT_VAULT_TOPIC_ARN="${EPR_DOCUMENT_VAULT_TOPIC_ARN:?EPR_DOCUMENT_VAULT_TOPIC_ARN env var required}"
 EPR_DOCUMENT_EVENT_SOURCE="${EPR_DOCUMENT_EVENT_SOURCE:-entity_permissions_core}"
+EPR_DOCUMENT_VAULT_SERVICE_URL="${EPR_DOCUMENT_VAULT_SERVICE_URL:-}"
+
+# Temporal Configuration (Optional - workflows disabled if not set)
+EPR_TEMPORAL_HOST="${EPR_TEMPORAL_HOST:-}"
+EPR_TEMPORAL_NAMESPACE="${EPR_TEMPORAL_NAMESPACE:-}"
+EPR_TEMPORAL_API_KEY="${EPR_TEMPORAL_API_KEY:-}"
+EPR_TEMPORAL_TASK_QUEUE="${EPR_TEMPORAL_TASK_QUEUE:-omen-workflows}"
+EPR_TEMPORAL_TLS_ENABLED="${EPR_TEMPORAL_TLS_ENABLED:-true}"
 
 # Audit Worker Configuration (Optional - worker runs in same task as API)
 # If EPR_AUDIT_SQS_URL is empty, worker will fail but API continues (non-essential container)
@@ -94,7 +102,8 @@ export TEMPLATE_PATH RENDERED_TASK_DEF
 export TASK_FAMILY CONTAINER_NAME IMAGE_URI EXECUTION_ROLE_ARN TASK_ROLE_ARN TASK_CPU TASK_MEMORY
 export EPR_ENVIRONMENT EPR_DATABASE_URL EPR_LOG_LEVEL EPR_LOG_JSON EPR_SQL_ECHO AWS_REGION
 export EPR_REDIS_URL EPR_REDIS_TOKEN EPR_REDIS_CACHE_PREFIX EPR_REDIS_CACHE_TTL
-export EPR_DOCUMENT_VAULT_TOPIC_ARN EPR_DOCUMENT_EVENT_SOURCE
+export EPR_DOCUMENT_VAULT_TOPIC_ARN EPR_DOCUMENT_EVENT_SOURCE EPR_DOCUMENT_VAULT_SERVICE_URL
+export EPR_TEMPORAL_HOST EPR_TEMPORAL_NAMESPACE EPR_TEMPORAL_API_KEY EPR_TEMPORAL_TASK_QUEUE EPR_TEMPORAL_TLS_ENABLED
 export EPR_AUDIT_SQS_URL EPR_AUDIT_SQS_MAX_MESSAGES EPR_AUDIT_SQS_WAIT_TIME EPR_AUDIT_SQS_VISIBILITY_TIMEOUT
 export CLOUDWATCH_LOG_GROUP CLOUDWATCH_STREAM_PREFIX
 
@@ -135,8 +144,12 @@ missing = [name for name in required_env if not os.environ.get(name)]
 if missing:
     raise SystemExit(f"Missing env vars: {', '.join(missing)}")
 
-# Optional worker env var - can be empty to disable worker
+# Optional env vars - can be empty to disable features
 epr_audit_sqs_url = os.environ.get("EPR_AUDIT_SQS_URL", "")
+epr_document_vault_service_url = os.environ.get("EPR_DOCUMENT_VAULT_SERVICE_URL", "")
+epr_temporal_host = os.environ.get("EPR_TEMPORAL_HOST", "")
+epr_temporal_namespace = os.environ.get("EPR_TEMPORAL_NAMESPACE", "")
+epr_temporal_api_key = os.environ.get("EPR_TEMPORAL_API_KEY", "")
 
 replacements = {
     "TASK_FAMILY": os.environ["TASK_FAMILY"],
@@ -160,6 +173,12 @@ replacements = {
     "CLOUDWATCH_STREAM_PREFIX": os.environ["CLOUDWATCH_STREAM_PREFIX"],
     "EPR_DOCUMENT_VAULT_TOPIC_ARN": os.environ["EPR_DOCUMENT_VAULT_TOPIC_ARN"],
     "EPR_DOCUMENT_EVENT_SOURCE": os.environ["EPR_DOCUMENT_EVENT_SOURCE"],
+    "EPR_DOCUMENT_VAULT_SERVICE_URL": epr_document_vault_service_url,
+    "EPR_TEMPORAL_HOST": epr_temporal_host,
+    "EPR_TEMPORAL_NAMESPACE": epr_temporal_namespace,
+    "EPR_TEMPORAL_API_KEY": epr_temporal_api_key,
+    "EPR_TEMPORAL_TASK_QUEUE": os.environ.get("EPR_TEMPORAL_TASK_QUEUE", "omen-workflows"),
+    "EPR_TEMPORAL_TLS_ENABLED": os.environ.get("EPR_TEMPORAL_TLS_ENABLED", "true"),
     "EPR_AUDIT_SQS_URL": epr_audit_sqs_url,
     "EPR_AUDIT_SQS_MAX_MESSAGES": os.environ["EPR_AUDIT_SQS_MAX_MESSAGES"],
     "EPR_AUDIT_SQS_WAIT_TIME": os.environ["EPR_AUDIT_SQS_WAIT_TIME"],

@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("EPR_ENVIRONMENT", "test")
-os.environ.setdefault("EPR_DATABASE_URL", "sqlite:///:memory:")
-os.environ.setdefault("EPR_REDIS_URL", "")
-os.environ.setdefault("EPR_REDIS_TOKEN", "")
-os.environ.setdefault("EPR_DOCUMENT_VAULT_TOPIC_ARN", "")
+# CRITICAL: Force test environment variables BEFORE any imports
+# This ensures tests NEVER use production database, even if EPR_DATABASE_URL is set
+os.environ["EPR_ENVIRONMENT"] = "test"
+os.environ["EPR_DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["EPR_REDIS_URL"] = ""
+os.environ["EPR_REDIS_TOKEN"] = ""
+os.environ["EPR_DOCUMENT_VAULT_TOPIC_ARN"] = ""
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))

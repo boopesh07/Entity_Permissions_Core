@@ -33,6 +33,11 @@ IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
 if [[ "${SKIP_TESTS}" != "true" ]]; then
   if [[ -x "${PYTHON}" ]]; then
     echo "Running test suite with ${PYTHON}"
+    # CRITICAL: Ensure tests use in-memory database, never production
+    # Unset EPR_DATABASE_URL if set, tests will use sqlite:///:memory: from conftest.py
+    unset EPR_DATABASE_URL
+    # Also ensure test environment
+    export EPR_ENVIRONMENT=test
     "${PYTHON}" -m pytest -vv
   else
     echo "WARNING: ${PYTHON} not found; skipping tests" >&2
