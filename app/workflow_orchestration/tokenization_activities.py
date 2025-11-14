@@ -520,32 +520,63 @@ async def update_token_registry_activity(payload: Dict[str, Any]) -> Dict[str, A
 @activity.defn(name="publish_platform_event_activity")
 async def publish_platform_event_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Publish platform event via event dispatcher.
+    Publish platform event via event service.
+    
+    This uses EventService.ingest() which handles:
+    - Event persistence
+    - SNS publishing
+    - Temporal signal sending to waiting workflows
+    - Workflow orchestration triggering
     """
     event_type = payload["event_type"]
     event_payload = payload["payload"]
+    source = payload.get("source", "entity_permissions_core")
+    correlation_id = payload.get("correlation_id")
     
     logger.info(
         "workflow_publish_platform_event",
-        extra={"event_type": event_type},
+        extra={
+            "event_type": event_type,
+            "source": source,
+        },
     )
     
     with session_scope() as session:
-        from app.events_engine import get_event_dispatcher
+        from app.events_engine.service import EventService
+        from app.schemas.event import EventIngestRequest
         
-        dispatcher = get_event_dispatcher()
-        event_record = dispatcher.publish_event(
-            session,
+        # Create event ingest request
+        ingest_request = EventIngestRequest(
             event_type=event_type,
+            source=source,
             payload=event_payload,
+            correlation_id=correlation_id,
         )
+        
+        # Use EventService.ingest() which handles signal sending
+        event_service = EventService(session)
+        event_record = event_service.ingest(ingest_request)
         session.commit()
         
         # Access attributes BEFORE session closes to avoid DetachedInstanceError
         event_id = event_record.event_id
         event_type_value = event_type
+        delivery_state = event_record.delivery_state
     
-    return {"event_id": event_id, "event_type": event_type_value}
+    logger.info(
+        "workflow_platform_event_published",
+        extra={
+            "event_id": event_id,
+            "event_type": event_type_value,
+            "delivery_state": delivery_state,
+        },
+    )
+    
+    return {
+        "event_id": event_id,
+        "event_type": event_type_value,
+        "delivery_state": delivery_state,
+    }
 
 
 @activity.defn(name="automated_document_verification_activity")
